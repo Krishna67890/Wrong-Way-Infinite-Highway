@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Chakra Petch", sans-serif;
+  --font-sans: "Plus Jakarta Sans", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
+    min-height: -webkit-fill-available;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #080a0f;
+    font-family: var(--font-sans);
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+  }
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-mono-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes rgbFlow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.rgb-credit-text {
+  background: linear-gradient(
+    90deg,
+    #ff2a5f,
+    #ff9900,
+    #ffee00,
+    #22ff88,
+    #00e1ff,
+    #8b5cf6,
+    #ff2a5f
+  );
+  background-size: 300% 300%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: rgbFlow 3.4s linear infinite;
+  filter: drop-shadow(0 0 12px rgba(0, 225, 255, 0.35));
+}
+
+.rgb-credit-bar {
+  background: linear-gradient(
+    90deg,
+    #ff2a5f,
+    #ff9900,
+    #ffee00,
+    #22ff88,
+    #00e1ff,
+    #8b5cf6,
+    #ff2a5f
+  );
+  background-size: 250% 250%;
+  animation: rgbFlow 2.6s linear infinite;
+}
+
+/* Custom sleek dark scrollbar for scrollable modal panels */
+.custom-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scroll::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.custom-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 3px;
+}
+
+.custom-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(245, 158, 11, 0.65);
+}

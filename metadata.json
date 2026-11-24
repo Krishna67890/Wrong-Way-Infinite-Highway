@@ -1,0 +1,6 @@
+{
+  "name": "WRONG WAY – Infinite Highway",
+  "description": "High-speed 3D endless wrong-way highway survival racing game with six-lane traffic, interactive 3D car garage, upgrades, power-ups, and 8 dynamic environments.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

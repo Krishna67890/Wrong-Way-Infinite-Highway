@@ -1,0 +1,64 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace "com.krishna.highwayhavocwrongway"
+    compileSdk 37
+    buildToolsVersion "36.0.0"
+
+    defaultConfig {
+        applicationId "com.krishna.highwayhavocwrongway"
+        minSdk 25
+        targetSdk 37
+        versionCode 1
+        versionName "1.0.0"
+        multiDexEnabled true
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+            applicationIdSuffix ".debug"
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.webkit:webkit:1.11.0'
+    implementation 'com.google.android.gms:play-services-ads:23.3.0'
+}
+
+tasks.register('copyDebugApk', Copy) {
+    from("${buildDir}/outputs/apk/debug")
+    include("*.apk")
+    into("${rootDir}/apk")
+    rename { "highway-havoc-wrong-way-debug.apk" }
+}
+
+tasks.register('copyReleaseApk', Copy) {
+    from("${buildDir}/outputs/apk/release")
+    include("*.apk")
+    into("${rootDir}/apk")
+    rename { "highway-havoc-wrong-way-release.apk" }
+}
+
+afterEvaluate {
+    tasks.matching { it.name == 'assembleDebug' }.configureEach {
+        finalizedBy('copyDebugApk')
+    }
+    tasks.matching { it.name == 'assembleRelease' }.configureEach {
+        finalizedBy('copyReleaseApk')
+    }
+}
