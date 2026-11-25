@@ -5,8 +5,8 @@ export type ScreenId =
   | 'upgrades'
   | 'worlds'
   | 'modes'
-  | 'events'
   | 'leaderboard'
+  | 'about'
   | 'playing'
   | 'paused'
   | 'gameover'
@@ -22,6 +22,7 @@ export type CarCategory =
   | 'hypercar'
   | 'luxury'
   | 'limousine'
+  | 'emergency'
   | 'special';
 
 export type CarClass =
@@ -50,7 +51,12 @@ export type CarAbilityId =
   | 'quad_overdrive'
   | 'phantom_blink'
   | 'vip_convoy'
-  | 'sovereign_zenith';
+  | 'sovereign_zenith'
+  | 'medic_siren'
+  | 'police_emp'
+  | 'fire_shield'
+  | 'tactical_armor'
+  | 'fire_chief_ghost';
 
 export interface CarAbilityDefinition {
   id: CarAbilityId;
@@ -85,8 +91,11 @@ export type CarBodyStyle =
   | 'nordic_hyper'
   | 'limousine'
   | 'police'
+  | 'suv_police'
   | 'cyber'
-  | 'legendary';
+  | 'legendary'
+  | 'van'
+  | 'truck';
 
 export type DecalStyle = 'clean' | 'stripes' | 'neon_trim' | 'carbon_hood';
 
@@ -106,9 +115,9 @@ export interface CarStats {
   tireGrip: number; // 1 - 100 (lane change speed)
   handling: number; // 1 - 100 (steering response)
   braking: number; // 1 - 100
-  damageResistance: number; // 0 - 0.55
+  damageResistance: number; // 0 - 0.65
   nitroCapacity: number; // seconds
-  repairEfficiency: number; // multiplier e.g. 1.0 - 1.45
+  repairEfficiency: number; // multiplier e.g. 1.0 - 1.7
 }
 
 export interface CarAudioProfile {
@@ -190,8 +199,10 @@ export type GameModeId =
   | 'coin_rush'
   | 'time_trial'
   | 'traffic_challenge'
-  | 'boss_escape'
+  | 'stunt_challenge'
   | 'daily_challenge';
+
+export type StuntRampType = 'standard' | 'super_launch' | 'dual_ramp';
 
 export interface GameModeDefinition {
   id: GameModeId;
@@ -205,6 +216,7 @@ export interface GameModeDefinition {
   timeLimitSec?: number;
   targetDistanceM?: number;
   targetNearMisses?: number;
+  targetStuntJumps?: number;
 }
 
 export type TrafficVehicleType =
@@ -216,7 +228,10 @@ export type TrafficVehicleType =
   | 'truck'
   | 'van'
   | 'motorbike'
-  | 'limousine';
+  | 'limousine'
+  | 'police'
+  | 'ambulance'
+  | 'fire_truck';
 
 export type BossType =
   | 'black_hypercar'
@@ -254,14 +269,15 @@ export type MissionMetric =
   | 'distance'
   | 'coins'
   | 'near_misses'
+  | 'stunt_jumps'
   | 'nitro_uses'
   | 'repairs'
   | 'survival_seconds'
   | 'no_damage_distance'
   | 'reach_200_kmh'
-  | 'boss_escapes'
+  | 'high_speed_kmh'
   | 'smashes'
-  | 'high_speed_kmh';
+  | 'boss_escapes';
 
 export interface DailyMission {
   id: string;
@@ -290,7 +306,13 @@ export interface EndlessMission {
 }
 
 export type AchievementTier = 'Bronze' | 'Silver' | 'Gold' | 'Platinum' | 'Mythic';
-export type AchievementCategory = 'Survival' | 'Speed' | 'Combat' | 'Garage' | 'Mastery';
+export type AchievementCategory =
+  | 'Survival'
+  | 'Speed'
+  | 'Traffic'
+  | 'Stunts'
+  | 'Garage'
+  | 'Mastery';
 
 export type AchievementMetric =
   | 'runs'
@@ -299,17 +321,17 @@ export type AchievementMetric =
   | 'top_speed_hit'
   | 'no_damage_distance'
   | 'total_near_misses'
+  | 'total_stunt_jumps'
+  | 'total_smashes'
   | 'best_combo'
   | 'repairs_collected'
   | 'total_coins'
   | 'cars_unlocked'
   | 'nitro_uses'
-  | 'crashes_survived_run'
   | 'has_hypercar'
   | 'has_limousine'
+  | 'has_emergency'
   | 'player_level'
-  | 'total_smashes'
-  | 'boss_escapes'
   | 'missions_completed'
   | 'upgrade_levels';
 
@@ -350,6 +372,7 @@ export interface PlayerProgress {
   totalDistance: number;
   totalRuns: number;
   totalNearMisses: number;
+  totalStuntJumps: number;
   totalCoinsEarned: number;
   totalRepairsCollected: number;
   totalNitroUses: number;
@@ -385,6 +408,7 @@ export interface HudNotification {
   id: number;
   text: string;
   tone: 'emerald' | 'cyan' | 'amber' | 'rose' | 'white';
+  durationSec: number;
 }
 
 export interface ActivePowerUpState {
@@ -422,6 +446,7 @@ export interface RunSummary {
   score: number;
   coinsEarned: number;
   nearMisses: number;
+  stuntJumps: number;
   maxCombo: number;
   maxSpeedKmh: number;
   xpEarned: number;
@@ -456,6 +481,7 @@ export interface LiveHudSnapshot {
   comboCount: number;
   comboTimerRatio: number;
   nearMisses: number;
+  stuntJumps: number;
   timeRemainingSec: number | null;
   modeProgressLabel: string | null;
   worldLabel: string;
@@ -464,7 +490,7 @@ export interface LiveHudSnapshot {
   activePowerUps: ActivePowerUpState;
   ability: AbilityHudState;
   boss: BossHudState;
-  tutorialStep: number; // 0 = steer, 1 = nitro, 2 = near-miss/ready, -1 = done
+  tutorialStep: number;
   canRevive: boolean;
   notifications: HudNotification[];
 }

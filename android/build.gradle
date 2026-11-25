@@ -1,4 +1,17 @@
+ext {
+    compileSdkVersion = 37
+    targetSdkVersion = 37
+    minSdkVersion = 25
+    androidxAppCompatVersion = '1.7.1'
+    cordovaAndroidVersion = '14.0.1'
+}
+
 buildscript {
+    ext {
+        compileSdkVersion = 37
+        targetSdkVersion = 37
+        minSdkVersion = 25
+    }
     repositories {
         google()
         mavenCentral()
@@ -9,6 +22,11 @@ buildscript {
 }
 
 allprojects {
+    ext {
+        compileSdkVersion = 37
+        targetSdkVersion = 37
+        minSdkVersion = 25
+    }
     repositories {
         google()
         mavenCentral()

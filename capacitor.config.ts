@@ -1,5 +1,5 @@
 const config = {
-  appId: 'com.highwayhavoc.wrongway',
+  appId: 'com.krishna.highwayhavocwrongway',
   appName: 'HIGHWAY HAVOC: WRONG WAY',
   webDir: 'dist',
   bundledWebRuntime: false,

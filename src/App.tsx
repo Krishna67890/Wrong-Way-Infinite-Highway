@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { isNativeAdsAvailable, preloadNativeAd, showRealAd } from './game/ads';
+import {
+  AdPurpose,
+  AdResult,
+  isNativeAdsAvailable,
+  preloadNativeAd,
+  registerWebAdPresenter,
+  setNativeGameplayActive,
+  showRealAd,
+} from './game/ads';
 import { audioEngine } from './game/audio';
 import { getCarById, getWorldById } from './game/data';
 import { WrongWayEngine } from './game/engine';
@@ -18,7 +26,6 @@ import {
   refreshDailyMissionsIfNeeded,
   resetAllProgress,
   saveProgress,
-  selectBoss,
   selectMode,
   selectWorld,
   setCarColor,
@@ -28,7 +35,6 @@ import {
   upgradeCarStat,
 } from './game/storage';
 import {
-  BossType,
   CarId,
   DecalStyle,
   GameModeId,
@@ -43,8 +49,8 @@ import {
 import { GameplayHud } from './components/GameplayHud';
 import { GarageScreen } from './components/GarageScreen';
 import {
+  AboutScreen,
   AchievementsScreen,
-  EventsScreen,
   GameOverModal,
   LeaderboardScreen,
   MissionsScreen,
@@ -69,6 +75,7 @@ const INITIAL_HUD: LiveHudSnapshot = {
   comboCount: 0,
   comboTimerRatio: 0,
   nearMisses: 0,
+  stuntJumps: 0,
   timeRemainingSec: null,
   modeProgressLabel: null,
   worldLabel: 'Neon City',
@@ -124,6 +131,11 @@ export default function App() {
   const [lastSummary, setLastSummary] = useState<RunSummary | null>(null);
   const [bonusClaimedThisRun, setBonusClaimedThisRun] = useState(false);
   const [adLoading, setAdLoading] = useState(false);
+  const [webAdState, setWebAdState] = useState<{
+    purpose: AdPurpose;
+    secondsLeft: number;
+    resolve: (res: AdResult) => void;
+  } | null>(null);
   const [bannerMessage, setBannerMessage] = useState<string | null>(null);
   const [webglError, setWebglError] = useState(false);
   const nativeAdsReady = isNativeAdsAvailable();
@@ -132,14 +144,39 @@ export default function App() {
     setBannerMessage(msg);
     window.setTimeout(() => {
       setBannerMessage((cur) => (cur === msg ? null : cur));
-    }, 2800);
+    }, 3200);
   }, []);
+
+  // Register interactive Web Sponsored Ad presenter for non-APK browser preview
+  useEffect(() => {
+    registerWebAdPresenter((purpose) => {
+      return new Promise<AdResult>((resolve) => {
+        setWebAdState({ purpose, secondsLeft: 5, resolve });
+      });
+    });
+    return () => registerWebAdPresenter(null);
+  }, []);
+
+  useEffect(() => {
+    if (!webAdState || webAdState.secondsLeft <= 0) return;
+    const t = window.setTimeout(() => {
+      setWebAdState((cur) =>
+        cur && cur.secondsLeft > 0 ? { ...cur, secondsLeft: cur.secondsLeft - 1 } : cur,
+      );
+    }, 1000);
+    return () => window.clearTimeout(t);
+  }, [webAdState]);
 
   // Sync audio & graphics settings
   useEffect(() => {
     audioEngine.updateSettings(progress.settings);
     engineRef.current?.updateSettings(progress.settings, progress.carUpgrades);
   }, [progress.settings, progress.carUpgrades]);
+
+  // Toggle native AdMob anchored banner visibility when entering/leaving gameplay
+  useEffect(() => {
+    setNativeGameplayActive(screen === 'playing');
+  }, [screen]);
 
   // Auto-refresh daily missions whenever a new day begins
   useEffect(() => {
@@ -433,7 +470,7 @@ export default function App() {
     commitProgress(next);
   };
 
-  // World, Mode & Boss Handlers
+  // World & Mode Handlers
   const handleSelectWorld = (worldId: WorldId) => {
     audioEngine.playUiClick();
     const next = selectWorld(progressRef.current, worldId);
@@ -454,17 +491,6 @@ export default function App() {
   const handleSelectMode = (modeId: GameModeId) => {
     audioEngine.playUiClick();
     commitProgress(selectMode(progressRef.current, modeId));
-  };
-
-  const handleSelectBoss = (boss: BossType) => {
-    audioEngine.playUiClick();
-    commitProgress(selectBoss(progressRef.current, boss));
-  };
-
-  const handleLaunchBossChase = () => {
-    const next = selectMode(progressRef.current, 'boss_escape');
-    commitProgress(next);
-    startDrive('boss_escape');
   };
 
   // Missions, Achievements & Daily Streak
@@ -541,34 +567,40 @@ export default function App() {
   const handleWatchAdRevive = async () => {
     if (!hud.canRevive || adLoading) return;
     setAdLoading(true);
-    const res = await showRealAd('free_revive');
-    setAdLoading(false);
-    if (!res.ok) {
-      showBanner(res.message);
-      return;
+    try {
+      const res = await showRealAd('free_revive');
+      if (!res.ok) {
+        showBanner(res.message);
+        return;
+      }
+      audioEngine.playUnlock();
+      setLastSummary(null);
+      setScreen('playing');
+      engineRef.current?.reviveRun();
+    } finally {
+      setAdLoading(false);
     }
-    audioEngine.playUnlock();
-    setLastSummary(null);
-    setScreen('playing');
-    engineRef.current?.reviveRun();
   };
 
   const handleWatchAdGarageCoins = async () => {
     if (adLoading) return;
     setAdLoading(true);
-    const res = await showRealAd('garage_coins');
-    setAdLoading(false);
-    if (!res.ok) {
-      showBanner(res.message);
-      return;
+    try {
+      const res = await showRealAd('garage_coins');
+      if (!res.ok) {
+        showBanner(res.message);
+        return;
+      }
+      audioEngine.playUnlock();
+      setProgress((prev) => {
+        const next = grantOptionalRunBonus(prev, 500);
+        progressRef.current = next;
+        return next;
+      });
+      showBanner('+500 Coins Rewarded!');
+    } finally {
+      setAdLoading(false);
     }
-    audioEngine.playUnlock();
-    setProgress((prev) => {
-      const next = grantOptionalRunBonus(prev, 500);
-      progressRef.current = next;
-      return next;
-    });
-    showBanner('+500 Coins Rewarded!');
   };
 
   const handleClaimOptionalBonus = async () => {
@@ -576,24 +608,30 @@ export default function App() {
     const bonusCoins = lastSummary.coinsEarned + lastSummary.modeBonusCoins;
     if (bonusCoins <= 0) return;
 
-    if (nativeAdsReady) {
-      setAdLoading(true);
+    setAdLoading(true);
+    try {
       const res = await showRealAd('double_coins');
-      setAdLoading(false);
       if (!res.ok) {
         showBanner(res.message);
         return;
       }
-    }
 
-    audioEngine.playUnlock();
-    setProgress((prev) => {
-      const next = grantOptionalRunBonus(prev, bonusCoins);
-      progressRef.current = next;
-      return next;
-    });
-    setBonusClaimedThisRun(true);
-    showBanner(`+${bonusCoins.toLocaleString()} Bonus Coins Added!`);
+      audioEngine.playUnlock();
+      setProgress((prev) => {
+        const next = grantOptionalRunBonus(prev, bonusCoins);
+        progressRef.current = next;
+        return next;
+      });
+      setBonusClaimedThisRun(true);
+      showBanner(`+${bonusCoins.toLocaleString()} Bonus Coins Added!`);
+    } finally {
+      setAdLoading(false);
+    }
+  };
+
+  const handleFinishRunFromPause = () => {
+    audioEngine.playUiClick();
+    engineRef.current?.finishCurrentRun();
   };
 
   return (
@@ -615,7 +653,7 @@ export default function App() {
       )}
 
       {bannerMessage && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 rounded-lg bg-emerald-500 px-4 py-2 font-display text-xs font-bold text-slate-950 shadow-lg">
+        <div className="fixed top-16 left-4 z-50 max-w-[80vw] sm:max-w-xs rounded-lg bg-emerald-500/95 border border-emerald-400 px-3 py-2 text-left font-display text-xs font-bold text-slate-950 shadow-lg">
           {bannerMessage}
         </div>
       )}
@@ -670,21 +708,16 @@ export default function App() {
         />
       )}
 
-      {screen === 'events' && (
-        <EventsScreen
-          selectedBoss={progress.selectedBoss}
-          totalEscapes={progress.totalBossEscapes}
-          onSelectBoss={handleSelectBoss}
-          onLaunchBossChase={handleLaunchBossChase}
-          onBack={() => navigateTo('menu')}
-        />
-      )}
-
       {screen === 'leaderboard' && (
         <LeaderboardScreen
           progress={progress}
           onBack={() => navigateTo('menu')}
+          onNavigateToAbout={() => navigateTo('about')}
         />
+      )}
+
+      {screen === 'about' && (
+        <AboutScreen onBack={() => navigateTo('menu')} />
       )}
 
       {screen === 'missions' && (
@@ -731,6 +764,7 @@ export default function App() {
       {screen === 'paused' && (
         <PauseModal
           onResume={() => navigateTo('playing')}
+          onFinishRun={handleFinishRunFromPause}
           onRestart={() => startDrive()}
           onSettings={() => navigateTo('settings')}
           onGarage={() => navigateTo('garage')}
@@ -753,6 +787,80 @@ export default function App() {
           onGarage={() => navigateTo('garage')}
           onHome={() => navigateTo('menu')}
         />
+      )}
+
+      {webAdState && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/82">
+          <div className="w-full max-w-sm rounded-xl bg-[#090d16] border border-amber-400/40 p-5 text-center shadow-2xl">
+            <div className="text-[11px] font-display font-bold tracking-widest uppercase text-amber-400 mb-1">
+              Sponsored Reward Ad
+            </div>
+            <h3 className="font-display text-lg font-bold text-white mb-1">
+              {webAdState.purpose === 'free_revive'
+                ? 'Free Highway Revive'
+                : webAdState.purpose === 'double_coins'
+                  ? '2x Run Coins Multiplier'
+                  : '+500 Garage Bonus Coins'}
+            </h3>
+            <p className="text-xs text-slate-300 mb-3">
+              {webAdState.purpose === 'free_revive'
+                ? 'Watch to repair your hull and jump right back into traffic.'
+                : webAdState.purpose === 'double_coins'
+                  ? 'Watch to double every coin collected on this run.'
+                  : 'Watch to add +500 bonus coins to your Garage balance.'}
+            </p>
+            <div className="rounded-lg bg-gradient-to-br from-slate-900 via-slate-900 to-cyan-950/60 border border-cyan-400/25 p-4 mb-4">
+              <div className="font-display text-xs font-bold uppercase tracking-wider text-cyan-300 mb-1">
+                Emergency &amp; Hypercar Collection
+              </div>
+              <div className="text-[11px] text-slate-300 mb-3 leading-relaxed">
+                Take control of the Rescue Ambulance, Highway Police Cruiser, Fire Brigade Engine, and 350+ km/h Hypercars against oncoming 6-lane traffic.
+              </div>
+              <div className="text-xs font-semibold text-white mb-2">
+                {webAdState.secondsLeft > 0
+                  ? `Reward unlocks in ${webAdState.secondsLeft}s...`
+                  : 'Reward Unlocked!'}
+              </div>
+              <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+                <div
+                  className="h-full bg-emerald-400 transition-all duration-300"
+                  style={{ width: `${((5 - webAdState.secondsLeft) / 5) * 100}%` }}
+                />
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={webAdState.secondsLeft > 0}
+                onClick={() => {
+                  const res = webAdState.resolve;
+                  setWebAdState(null);
+                  res({ ok: true, message: 'Sponsored ad reward earned!' });
+                }}
+                className={`w-full rounded-lg py-2.5 font-display text-sm font-bold transition-colors ${
+                  webAdState.secondsLeft > 0
+                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                    : 'bg-emerald-500 text-slate-950 hover:bg-emerald-400 cursor-pointer'
+                }`}
+              >
+                {webAdState.secondsLeft > 0
+                  ? `WAIT ${webAdState.secondsLeft}s...`
+                  : 'CLAIM REWARD & CONTINUE'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const res = webAdState.resolve;
+                  setWebAdState(null);
+                  res({ ok: false, message: 'Ad closed before reward unlocked.' });
+                }}
+                className="w-full rounded-lg bg-slate-900 border border-white/10 py-2 text-xs font-semibold text-slate-400 hover:text-white cursor-pointer"
+              >
+                Close Ad
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

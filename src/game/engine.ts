@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { audioEngine } from './audio';
 import {
-  getBossById,
   getCarById,
   getEffectiveCarStats,
   getModeById,
@@ -10,13 +9,11 @@ import {
   WORLDS,
 } from './data';
 import {
-  buildBossCarModel,
   buildCoinModel,
   buildPlayerCarModel,
   buildPowerUpModel,
   buildRepairPickupModel,
   buildTrafficVehicleModel,
-  BossVehicleRig,
   PlayerCarRig,
   TrafficVehicleRig,
 } from './models';
@@ -25,7 +22,6 @@ import {
   createShowroomFloorTexture,
   getLaneCenterX,
   LANE_COUNT,
-  LANE_WIDTH,
   SEGMENT_LENGTH,
 } from './textures';
 import {
@@ -41,27 +37,13 @@ import {
   PowerUpType,
   RepairPickupTier,
   RunSummary,
+  StuntRampType,
   TrafficVehicleType,
   WorldId,
 } from './types';
 import { buildHighwayEnvironment, HighwayEnvironmentRig } from './worldBuilder';
 
 export type EngineViewMode = 'highway_attract' | 'gameplay' | 'paused' | 'showroom';
-
-interface PooledTraffic {
-  active: boolean;
-  type: TrafficVehicleType;
-  rig: TrafficVehicleRig;
-  lane: number;
-  targetLane: number;
-  x: number;
-  z: number;
-  speed: number;
-  nearMissed: boolean;
-  collided: boolean;
-  laneChangeTimer: number;
-  telegraphingDir: -1 | 0 | 1;
-}
 
 interface PooledCoin {
   active: boolean;
@@ -76,6 +58,23 @@ interface PooledRepair {
   mesh: THREE.Group;
   x: number;
   z: number;
+}
+
+interface PooledTraffic {
+  active: boolean;
+  type: TrafficVehicleType;
+  rig: TrafficVehicleRig;
+  lane: number;
+  targetLane: number;
+  x: number;
+  z: number;
+  speedUnits: number;
+  nearMissed: boolean;
+  smashed: boolean;
+  smashVx: number;
+  smashSpin: number;
+  laneShiftAttempted: boolean;
+  signalTimer: number;
 }
 
 interface PooledPowerUp {
@@ -100,18 +99,6 @@ interface ParticleItem {
 }
 
 const SEGMENT_COUNT = 14;
-const TRAFFIC_TYPES: TrafficVehicleType[] = [
-  'sedan',
-  'suv',
-  'sports',
-  'supercar',
-  'bus',
-  'truck',
-  'van',
-  'motorbike',
-  'limousine',
-];
-
 const _tmpVec = new THREE.Vector3();
 
 export interface EngineCallbacks {
@@ -131,6 +118,7 @@ export class WrongWayEngine {
   private frameId = 0;
   private lastTimestamp = 0;
   private disposed = false;
+  private resizeObserver: ResizeObserver | null = null;
 
   private hemiLight: THREE.HemisphereLight;
   private keyLight: THREE.DirectionalLight;
@@ -155,23 +143,9 @@ export class WrongWayEngine {
   private activeModeId: GameModeId = 'endless';
   private settings: GameSettings;
 
-  // Boss State
-  private bossRig: BossVehicleRig | null = null;
-  private activeBossType: BossType = 'black_hypercar';
-  private bossActive = false;
-  private bossTimer = 0;
-  private bossTotalDuration = 60;
-  private bossLane = 3;
-  private bossX = getLaneCenterX(3);
-  private bossZ = -22;
-  private bossMoveCooldown = 2.0;
-  private bossHitCooldown = 0;
-  private bossWarningText: string | null = null;
-  private bossEscapedThisRun = false;
-  private nextEndlessBossM = 9999999;
   private nextBiomeTransitionM = 1200;
 
-  // Object Pools
+  // Object Pools (Traffic, Coins, Repairs, PowerUps & Particles)
   private trafficPool: PooledTraffic[] = [];
   private coinPool: PooledCoin[] = [];
   private repairPool: PooledRepair[] = [];
@@ -192,7 +166,6 @@ export class WrongWayEngine {
   private playerY = 0;
   private playerYVel = 0;
   private playerPitch = 0;
-  private stuntCooldown = 0;
   private tiltCooldown = 0;
 
   private health = 100;
@@ -215,9 +188,10 @@ export class WrongWayEngine {
   private comboCount = 0;
   private comboTimer = 0;
   private nearMisses = 0;
+  private smashes = 0;
+  private stuntJumps = 0;
   private maxCombo = 0;
   private maxSpeedKmh = 0;
-  private smashes = 0;
   private repairsCollected = 0;
 
   private damageCooldown = 0;
@@ -239,13 +213,13 @@ export class WrongWayEngine {
   private timeRemainingSec: number | null = null;
   private nextCheckpointM = 450;
 
-  private tutorialStep = -1; // 0: steer, 1: nitro, 2: dodge/near-miss, -1: done
+  private tutorialStep = -1; // 0: steer, 1: nitro, 2: near miss / stunt ramp, -1: done
 
-  private spawnTimer = 0;
+  private trafficSpawnTimer = 0;
   private coinSpawnTimer = 0;
   private pickupSpawnTimer = 0;
+  private smokeEmitTimer = 0;
   private hudEmitAccum = 0;
-  private smokeEmitAccum = 0;
   private attractTime = 0;
 
   private notifications: HudNotification[] = [];
@@ -412,6 +386,10 @@ export class WrongWayEngine {
 
     window.addEventListener('resize', this.handleResize);
     window.addEventListener('orientationchange', this.handleResize);
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => this.handleResize());
+      this.resizeObserver.observe(this.container);
+    }
     this.renderer.domElement.addEventListener('pointerdown', this.handlePointerDown);
     window.addEventListener('pointermove', this.handlePointerMove);
     window.addEventListener('pointerup', this.handlePointerUp);
@@ -421,8 +399,43 @@ export class WrongWayEngine {
   }
 
   private initPools(): void {
-    for (let i = 0; i < 46; i++) {
-      const type = TRAFFIC_TYPES[i % TRAFFIC_TYPES.length];
+    const trafficTypes: TrafficVehicleType[] = [
+      'sedan',
+      'suv',
+      'sports',
+      'van',
+      'police',
+      'sedan',
+      'supercar',
+      'ambulance',
+      'truck',
+      'motorbike',
+      'sedan',
+      'bus',
+      'suv',
+      'fire_truck',
+      'sports',
+      'limousine',
+      'van',
+      'sedan',
+      'police',
+      'suv',
+      'motorbike',
+      'sports',
+      'supercar',
+      'ambulance',
+      'sedan',
+      'van',
+      'truck',
+      'suv',
+      'sports',
+      'bus',
+      'police',
+      'sedan',
+      'fire_truck',
+      'motorbike',
+    ];
+    for (const type of trafficTypes) {
       const rig = buildTrafficVehicleModel(type, this.shadowTex);
       rig.group.visible = false;
       this.scene.add(rig.group);
@@ -434,15 +447,17 @@ export class WrongWayEngine {
         targetLane: 0,
         x: 0,
         z: -500,
-        speed: 25,
+        speedUnits: 20,
         nearMissed: false,
-        collided: false,
-        laneChangeTimer: 0,
-        telegraphingDir: 0,
+        smashed: false,
+        smashVx: 0,
+        smashSpin: 0,
+        laneShiftAttempted: false,
+        signalTimer: 0,
       });
     }
 
-    for (let i = 0; i < 70; i++) {
+    for (let i = 0; i < 80; i++) {
       const mesh = buildCoinModel();
       mesh.visible = false;
       this.scene.add(mesh);
@@ -616,7 +631,6 @@ export class WrongWayEngine {
     this.showroomGroup.visible = isShowroom;
     if (this.highwayRig) this.highwayRig.root.visible = !isShowroom;
     if (this.playerRig) this.playerRig.group.visible = !isShowroom;
-    if (this.bossRig) this.bossRig.group.visible = !isShowroom && this.bossActive;
 
     if (isShowroom) {
       this.scene.background = new THREE.Color('#090d16');
@@ -633,31 +647,6 @@ export class WrongWayEngine {
         audioEngine.startEngine(getCarById(this.activeCarId).audio);
       }
     }
-  }
-
-  private spawnBoss(bossType: BossType): void {
-    this.activeBossType = bossType;
-    if (this.bossRig) {
-      this.scene.remove(this.bossRig.group);
-      this.disposeObject3D(this.bossRig.group);
-    }
-    this.bossRig = buildBossCarModel(bossType, this.shadowTex);
-    this.bossLane = Math.floor(Math.random() * LANE_COUNT);
-    this.bossX = getLaneCenterX(this.bossLane);
-    this.bossZ = -26;
-    this.bossRig.group.position.set(this.bossX, 0, this.bossZ);
-    this.bossRig.group.visible = true;
-    this.scene.add(this.bossRig.group);
-
-    this.bossActive = true;
-    this.bossTotalDuration = 60;
-    this.bossTimer = 60;
-    this.bossMoveCooldown = 2.5;
-    this.bossHitCooldown = 0;
-    this.bossWarningText = null;
-    const bossMeta = getBossById(bossType);
-    this.pushNotification(`BOSS PURSUIT · ${bossMeta.name.toUpperCase()}`, 'rose');
-    this.triggerHaptic([50, 40, 80]);
   }
 
   public startNewRun(params: {
@@ -685,13 +674,13 @@ export class WrongWayEngine {
 
     this.hideAllPoolItems();
     this.clearParticles();
-
-    if (this.bossRig) {
-      this.bossRig.group.visible = false;
+    if (this.highwayRig) {
+      for (const seg of this.highwayRig.segments) {
+        seg.rampTriggered = false;
+        seg.hoopTriggered = false;
+      }
     }
-    this.bossActive = false;
-    this.bossEscapedThisRun = false;
-    this.nextEndlessBossM = 9999999;
+
     this.nextBiomeTransitionM = 1200;
 
     this.targetLane = 2;
@@ -702,7 +691,6 @@ export class WrongWayEngine {
     this.playerY = 0;
     this.playerYVel = 0;
     this.playerPitch = 0;
-    this.stuntCooldown = 0;
 
     this.health = 100;
     this.maxHealth = 100;
@@ -723,12 +711,13 @@ export class WrongWayEngine {
     this.comboCount = 0;
     this.comboTimer = 0;
     this.nearMisses = 0;
+    this.smashes = 0;
+    this.stuntJumps = 0;
     this.maxCombo = 0;
     this.maxSpeedKmh = 0;
-    this.smashes = 0;
     this.repairsCollected = 0;
 
-    this.damageCooldown = 0;
+    this.damageCooldown = 1.2;
     this.damageFlash = 0;
     this.hitstopTimer = 0;
     this.cameraShake = 0;
@@ -750,9 +739,10 @@ export class WrongWayEngine {
 
     this.tutorialStep = params.tutorialNeeded ? 0 : -1;
 
-    this.spawnTimer = 0.45;
-    this.coinSpawnTimer = 0.6;
-    this.pickupSpawnTimer = 4.5;
+    this.trafficSpawnTimer = 0.4;
+    this.coinSpawnTimer = 0.55;
+    this.pickupSpawnTimer = 4.2;
+    this.smokeEmitTimer = 0;
     this.notifications = [];
 
     if (this.playerRig) {
@@ -763,37 +753,44 @@ export class WrongWayEngine {
     }
 
     this.setViewMode('gameplay');
-
-    if (params.modeId === 'boss_escape') {
-      this.spawnBoss(params.bossType);
-    } else {
-      this.pushNotification(`WRONG WAY · ${modeDef.name.toUpperCase()}`, 'amber');
-    }
+    // Immediately populate initial oncoming traffic waves ahead so wrong-way driving starts right away
+    this.spawnFairTrafficWave(-155, 2);
+    this.spawnFairTrafficWave(-245, -1);
     this.emitHud();
+  }
+
+  public finishCurrentRun(): void {
+    this.nitroActive = false;
+    this.braking = false;
+    audioEngine.stopEngine();
+    this.finishRunAndReport();
   }
 
   public reviveRun(): void {
     this.revivedThisRun = true;
     this.crashPendingSummary = false;
     this.crashSlowMoTimer = 0;
+    this.notifications = [];
     this.health = 65;
     this.damageCooldown = 2.6;
     this.shieldRemaining = Math.max(this.shieldRemaining, 2.8);
     if (this.timeRemainingSec !== null && this.timeRemainingSec <= 0) {
       this.timeRemainingSec = 22;
     }
-    for (const t of this.trafficPool) {
-      if (t.active && t.z > -115) {
-        t.active = false;
-        t.rig.group.visible = false;
+    // Clear nearby oncoming vehicles so reviving never causes an instant double-crash
+    for (const v of this.trafficPool) {
+      if (v.active && v.z > -95 && v.z < 28) {
+        v.active = false;
+        v.rig.group.visible = false;
       }
     }
     if (this.playerRig) {
       this.playerRig.group.rotation.set(0, 0, 0);
       this.playerRig.group.visible = true;
+      this.playerRig.damageOverlays.forEach((d, idx) => (d.visible = idx === 0));
     }
     this.setViewMode('gameplay');
-    this.pushNotification('REVIVED · +65 HP & SHIELD', 'cyan');
+    this.pushNotification('REVIVED · +65 HP & CLEAR ROAD', 'cyan');
     audioEngine.playPowerUp('shield');
     this.emitHud();
   }
@@ -872,13 +869,28 @@ export class WrongWayEngine {
     if (ab.id === 'sovereign_zenith') {
       this.health = Math.min(this.maxHealth, this.health + 20);
       this.nitroAmount = 1.0;
+      this.nitroActive = true;
       this.magnetRemaining = Math.max(this.magnetRemaining, ab.durationSec);
-    } else if (ab.id === 'quad_overdrive') {
+    } else if (ab.id === 'quad_overdrive' || ab.id === 'fire_chief_ghost') {
       this.nitroAmount = 1.0;
       this.nitroActive = true;
-      this.shieldRemaining = Math.max(this.shieldRemaining, ab.durationSec);
+      if (ab.id === 'quad_overdrive') {
+        this.shieldRemaining = Math.max(this.shieldRemaining, ab.durationSec);
+      }
     } else if (ab.id === 'phantom_blink') {
       this.magnetRemaining = Math.max(this.magnetRemaining, ab.durationSec);
+    } else if (ab.id === 'emp_pulse' || ab.id === 'police_emp') {
+      this.nitroAmount = 1.0;
+      this.nitroActive = true;
+      this.magnetRemaining = Math.max(this.magnetRemaining, ab.durationSec);
+    } else if (ab.id === 'shockwave_ram') {
+      this.score += 450;
+      this.magnetRemaining = Math.max(this.magnetRemaining, ab.durationSec);
+    } else if (ab.id === 'fire_shield') {
+      this.health = Math.min(this.maxHealth, this.health + 10);
+      this.shieldRemaining = Math.max(this.shieldRemaining, ab.durationSec);
+    } else if (ab.id === 'vip_convoy') {
+      this.shieldRemaining = Math.max(this.shieldRemaining, ab.durationSec);
     }
 
     this.pushNotification(`${ab.name.toUpperCase()} ACTIVATED!`, 'cyan');
@@ -886,9 +898,9 @@ export class WrongWayEngine {
   }
 
   private hideAllPoolItems(): void {
-    for (const t of this.trafficPool) {
-      t.active = false;
-      t.rig.group.visible = false;
+    for (const v of this.trafficPool) {
+      v.active = false;
+      v.rig.group.visible = false;
     }
     for (const c of this.coinPool) {
       c.active = false;
@@ -935,7 +947,7 @@ export class WrongWayEngine {
   }
 
   private spawnSmoke(x: number, y: number, z: number): void {
-    for (let i = 80; i < 140; i++) {
+    for (let i = 80; i < this.particlePool.length; i++) {
       const p = this.particlePool[i];
       if (!p.active) {
         p.active = true;
@@ -943,21 +955,42 @@ export class WrongWayEngine {
         p.x = x + (Math.random() - 0.5) * 0.45;
         p.y = y;
         p.z = z;
-        p.vx = (Math.random() - 0.5) * 1.6;
-        p.vy = 2.2 + Math.random() * 1.8;
-        p.vz = 7 + Math.random() * 5;
+        p.vx = (Math.random() - 0.5) * 1.4;
+        p.vy = 1.6 + Math.random() * 1.8;
+        p.vz = 4 + Math.random() * 4;
         p.life = 0;
         p.maxLife = 0.65 + Math.random() * 0.4;
-        break;
+        return;
       }
     }
   }
 
-  private pushNotification(text: string, tone: HudNotification['tone']): void {
+  private pushNotification(
+    text: string,
+    tone: HudNotification['tone'],
+    durationSec = 1.8,
+  ): void {
     this.notifications = [
       ...this.notifications.slice(-2),
-      { id: this.notifCounter++, text, tone },
+      { id: this.notifCounter++, text, tone, durationSec },
     ];
+    this.emitHud();
+  }
+
+  private updateNotifications(dt: number): void {
+    if (this.notifications.length === 0) return;
+    let expired = false;
+    this.notifications = this.notifications.filter((n) => {
+      n.durationSec -= dt;
+      if (n.durationSec <= 0) {
+        expired = true;
+        return false;
+      }
+      return true;
+    });
+    if (expired) {
+      this.emitHud();
+    }
   }
 
   private getCurrentCarStats() {
@@ -1024,12 +1057,17 @@ export class WrongWayEngine {
     if (this.showroomCarRig) {
       this.showroomCarRig.group.rotation.y = this.showroomAngle;
     }
+    const aspect = this.camera.aspect || 1.5;
+    const portraitBoost = aspect < 1.0 ? Math.min(1, (1.0 - aspect) / 0.55) : 0;
+    const pullBack = 7.2 + portraitBoost * 4.4;
+    const showroomY = 2.35 + portraitBoost * 0.55;
+    const showroomFov = 46 + portraitBoost * 10;
     this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, 0, 6, dt);
-    this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, 2.4, 6, dt);
-    this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, 7.2, 6, dt);
-    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, 46, 6, dt);
+    this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, showroomY, 6, dt);
+    this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, pullBack, 6, dt);
+    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, showroomFov, 6, dt);
     this.camera.updateProjectionMatrix();
-    this.camera.lookAt(0, 0.65, 0);
+    this.camera.lookAt(0, aspect < 0.85 ? -0.35 : 0.45, 0);
   }
 
   private updateAttractHighway(dt: number): void {
@@ -1046,6 +1084,7 @@ export class WrongWayEngine {
         4,
         dt,
       );
+      this.playerRig.group.position.y = 0;
       this.playerRig.group.rotation.set(0, 0, -Math.cos(this.attractTime * 0.45) * 0.03);
       for (const w of this.playerRig.wheels) {
         w.rotation.x -= dt * 18;
@@ -1057,11 +1096,13 @@ export class WrongWayEngine {
       }
     }
 
+    const aspect = this.camera.aspect || 1.5;
+    const portraitBoost = aspect < 1.0 ? Math.min(1, (1.0 - aspect) / 0.55) : 0;
     const camX = Math.sin(this.attractTime * 0.3) * 2.5;
     this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, camX, 3, dt);
-    this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, 4.4, 3, dt);
-    this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, 9.5, 3, dt);
-    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, 60, 4, dt);
+    this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, 4.4 + portraitBoost * 0.8, 3, dt);
+    this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, 9.5 + portraitBoost * 2.4, 3, dt);
+    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, 60 + portraitBoost * 12, 4, dt);
     this.camera.updateProjectionMatrix();
     this.camera.lookAt(0, 1.0, -18);
   }
@@ -1073,6 +1114,8 @@ export class WrongWayEngine {
       seg.zStart += dz;
       if (seg.zStart > SEGMENT_LENGTH * 1.5) {
         seg.zStart -= totalLength;
+        seg.rampTriggered = false;
+        seg.hoopTriggered = false;
       }
       seg.group.position.z = seg.zStart;
     }
@@ -1154,10 +1197,6 @@ export class WrongWayEngine {
       const slowDt = dt * 0.28;
       this.scrollRoadSegments(this.speedUnits * slowDt * 0.45);
       this.updateParticles(dt);
-      if (this.playerRig) {
-        this.playerRig.group.rotation.y += dt * 3.6;
-        this.playerRig.group.rotation.z = Math.sin(this.crashSlowMoTimer * 18) * 0.12;
-      }
       this.cameraShake = Math.max(this.cameraShake - dt * 1.4, 0);
       this.updateFollowCamera(dt, false);
 
@@ -1172,6 +1211,7 @@ export class WrongWayEngine {
     const worldDef = getWorldById(this.activeWorldId);
 
     this.survivalSeconds += dt;
+    this.updateNotifications(dt);
     if (this.tiltCooldown > 0) this.tiltCooldown = Math.max(0, this.tiltCooldown - dt);
     if (this.damageCooldown > 0) this.damageCooldown = Math.max(0, this.damageCooldown - dt);
     if (this.damageFlash > 0) this.damageFlash = Math.max(0, this.damageFlash - dt * 2.4);
@@ -1215,6 +1255,10 @@ export class WrongWayEngine {
 
     const overdriveActive = abId === 'quad_overdrive' && this.abilityActiveRemaining > 0;
     const zenithActive = abId === 'sovereign_zenith' && this.abilityActiveRemaining > 0;
+    const phaseSpeedBoost =
+      (abId === 'phase_ghost' || abId === 'fire_shield' || abId === 'time_warp') &&
+      this.abilityActiveRemaining > 0;
+
     if (this.nitroActive) {
       if (!overdriveActive) {
         this.nitroAmount -= (dt * (zenithActive ? 0.45 : 1.0)) / carStats.nitroCapacity;
@@ -1234,6 +1278,7 @@ export class WrongWayEngine {
     if (overdriveActive) targetSpeed *= 1.42;
     else if (this.nitroActive) targetSpeed *= abId === 'overboost' ? 1.44 : 1.32;
     else if (this.braking) targetSpeed *= 0.56;
+    if (phaseSpeedBoost) targetSpeed *= 1.15;
 
     const accelRate = (this.braking ? carStats.braking : carStats.acceleration) * 0.045;
     this.speedUnits = THREE.MathUtils.damp(this.speedUnits, targetSpeed, accelRate, dt);
@@ -1253,9 +1298,6 @@ export class WrongWayEngine {
     if (curM > prevM) {
       const gainedM = curM - prevM;
       this.score += gainedM * (1 + this.comboCount * 0.25);
-      if (Math.floor(curM / 25) > Math.floor(prevM / 25)) {
-        this.runCoins += abId === 'vip_convoy' ? 2 : 1;
-      }
     }
 
     // Seamless biome transition every 1,200m in Endless mode
@@ -1265,18 +1307,6 @@ export class WrongWayEngine {
       const nextWorld = WORLDS[(curIdx + 1) % WORLDS.length];
       this.rebuildWorld(nextWorld.id);
       this.pushNotification(`ENTERING ${nextWorld.name.toUpperCase()}`, 'cyan');
-    }
-
-    // Trigger periodic Boss Chase event in Endless mode every 1,400m
-    if (this.activeModeId === 'endless' && !this.bossActive && this.distanceM >= this.nextEndlessBossM) {
-      this.nextEndlessBossM += 1600;
-      const bossTypes: BossType[] = [
-        'black_hypercar',
-        'police_interceptor',
-        'highway_hunter',
-        'cyber_beast',
-      ];
-      this.spawnBoss(bossTypes[Math.floor(Math.random() * bossTypes.length)]);
     }
 
     if (this.timeRemainingSec !== null && this.distanceM >= this.nextCheckpointM) {
@@ -1295,7 +1325,17 @@ export class WrongWayEngine {
         this.nearMisses >= modeDef.targetNearMisses
       ) {
         this.modeBonusClaimed = true;
-        this.pushNotification('CHALLENGE COMPLETE · +800 COINS', 'emerald');
+        this.pushNotification('WRONG-WAY CONTRACT COMPLETE · +900 COINS', 'emerald');
+        audioEngine.playUnlock();
+      } else if (
+        this.activeModeId === 'stunt_challenge' &&
+        modeDef.targetDistanceM &&
+        modeDef.targetStuntJumps &&
+        this.distanceM >= modeDef.targetDistanceM &&
+        this.stuntJumps >= modeDef.targetStuntJumps
+      ) {
+        this.modeBonusClaimed = true;
+        this.pushNotification('STUNT CONTRACT COMPLETE · +800 COINS', 'emerald');
         audioEngine.playUnlock();
       } else if (
         this.activeModeId === 'time_trial' &&
@@ -1318,39 +1358,74 @@ export class WrongWayEngine {
     this.playerRoll = THREE.MathUtils.damp(this.playerRoll, -vx * 0.011, 14, dt);
     this.playerYaw = THREE.MathUtils.damp(this.playerYaw, -vx * 0.014, 14, dt);
 
-    // Stunt Jump & Gravity Physics
-    if (this.playerY > 0) {
-      this.playerYVel -= 24 * dt;
+    // Interactive Stunt Ramp & Hoop Detection
+    if (this.highwayRig) {
+      for (const seg of this.highwayRig.segments) {
+        if (seg.hasRamp && !seg.rampTriggered && this.playerY <= 0.35) {
+          const rampZ = seg.zStart + seg.rampZLocal;
+          const rType = seg.rampType ?? 'standard';
+          const alignWindow =
+            rType === 'dual_ramp'
+              ? 3.6
+              : abId === 'steady_grip'
+                ? 2.3
+                : 1.85;
+          if (Math.abs(rampZ) < 2.8 && Math.abs(this.playerX - seg.rampX) < alignWindow) {
+            seg.rampTriggered = true;
+            let launchVel =
+              rType === 'super_launch'
+                ? 14.2
+                : rType === 'dual_ramp'
+                  ? 11.2
+                  : 9.8;
+            if (abId === 'tactical_armor') launchVel += 1.8;
+            if (this.nitroActive) launchVel += 3.6;
+
+            this.playerYVel = launchVel;
+            this.playerY = 0.08;
+            this.triggerStuntJump(rType);
+          }
+        }
+        if (seg.hasHoop && !seg.hoopTriggered && this.playerY > 0.6) {
+          const hoopZ = seg.zStart + seg.hoopZLocal;
+          if (Math.abs(hoopZ) < 2.8 && Math.abs(this.playerX - seg.hoopX) < 2.8) {
+            seg.hoopTriggered = true;
+            const hoopScore = seg.rampType === 'super_launch' ? 1200 : 600;
+            this.score += hoopScore;
+            this.spawnSparks(this.playerX, this.playerY + 0.8, 0, 28);
+            audioEngine.playUnlock();
+            this.triggerHaptic([20, 20, 35]);
+            this.pushNotification(
+              seg.rampType === 'super_launch'
+                ? 'SUPER HOOP RING CLEAR! +1,200 SCORE'
+                : 'AIRBORNE HOOP CLEAR! +600 SCORE',
+              'emerald',
+            );
+          }
+        }
+      }
+    }
+
+    // Stunt Airborne Gravity Physics & Jump Tilt Dynamics
+    if (this.playerY > 0 || this.playerYVel > 0) {
+      this.playerYVel -= 21 * dt;
       this.playerY += this.playerYVel * dt;
-      this.playerPitch += dt * 3.5;
+      const targetPitch = THREE.MathUtils.clamp(this.playerYVel * 0.035, -0.28, 0.42);
+      this.playerPitch = THREE.MathUtils.damp(this.playerPitch, targetPitch, 12, dt);
       if (this.playerY <= 0) {
         this.playerY = 0;
         this.playerYVel = 0;
         this.playerPitch = 0;
-        this.pushNotification('STUNT LANDING PERFECT! +500 PTS', 'amber');
-        this.runCoins += 25;
-        this.score += 500;
-        audioEngine.playPowerUp('nitro');
-      }
-    } else {
-      if (this.stuntCooldown > 0) {
-        this.stuntCooldown -= dt;
-      } else {
-        if (Math.floor(this.distanceM) % 85 < 3 && Math.abs(this.playerX) > 1.6) {
-          this.playerYVel = 9.8 + (this.nitroActive ? 4.5 : 0);
-          this.playerY = 0.01;
-          this.stuntCooldown = 3.0;
-          this.pushNotification('MEGA STUNT RAMP JUMP! +750 PTS', 'cyan');
-          this.score += 750;
-          this.runCoins += 35;
-          audioEngine.playPowerUp('nitro');
-        }
+        this.spawnSparks(this.playerX, 0.15, 0, 16);
       }
     }
 
     const ghostPhaseActive =
       this.abilityActiveRemaining > 0 &&
-      (abId === 'phase_ghost' || abId === 'phantom_blink' || abId === 'sovereign_zenith');
+      (abId === 'phase_ghost' ||
+        abId === 'phantom_blink' ||
+        abId === 'sovereign_zenith' ||
+        abId === 'fire_chief_ghost');
 
     if (this.playerRig) {
       this.playerRig.group.position.x = this.playerX;
@@ -1384,18 +1459,6 @@ export class WrongWayEngine {
         mat.emissiveIntensity = this.braking ? 5.5 : 2.0;
       }
 
-      // 4-Stage Visual Damage: 100-75 normal, 74-50 minor, 49-25 warning+smoke, 24-1 critical+broken lights
-      this.playerRig.damageOverlays[0].visible = this.health <= 74;
-      this.playerRig.damageOverlays[1].visible = this.health <= 49;
-      this.playerRig.damageOverlays[2].visible = this.health <= 24;
-
-      // Flickering / dimmed broken headlights below 25 HP
-      const lightIntensity =
-        this.health <= 24 ? (Math.random() > 0.35 ? 0.6 : 0.1) : this.health <= 49 ? 1.4 : 2.2;
-      for (const hl of this.playerRig.headlights) {
-        (hl.material as THREE.MeshStandardMaterial).emissiveIntensity = lightIntensity;
-      }
-
       if (this.playerRig.policeBarLights.length === 2) {
         const flash = Math.floor(performance.now() / 130) % 2 === 0;
         this.playerRig.policeBarLights[0].visible = flash;
@@ -1406,65 +1469,57 @@ export class WrongWayEngine {
       for (const w of this.playerRig.wheels) {
         w.rotation.x -= wheelSpin;
       }
+    }
 
-      // Increasing smoke at Warning (<50 HP) & Critical (<25 HP)
-      if (this.health <= 49) {
-        this.smokeEmitAccum += dt;
-        const rate = this.health <= 24 ? 0.032 : 0.085;
-        if (this.smokeEmitAccum >= rate) {
-          this.smokeEmitAccum = 0;
-          this.spawnSmoke(
-            this.playerX + this.playerRig.smokeAnchor.x,
-            this.playerRig.smokeAnchor.y,
-            this.playerRig.smokeAnchor.z,
-          );
-        }
+    if (this.health < 50 && this.playerRig) {
+      this.smokeEmitTimer -= dt;
+      if (this.smokeEmitTimer <= 0) {
+        this.smokeEmitTimer = this.health < 25 ? 0.06 : 0.14;
+        this.spawnSmoke(
+          this.playerX + this.playerRig.smokeAnchor.x,
+          this.playerY + this.playerRig.smokeAnchor.y,
+          this.playerRig.smokeAnchor.z,
+        );
       }
     }
 
-    this.headlightSpot.position.set(this.playerX, 1.15, -2.0);
+    this.headlightSpot.position.set(this.playerX, 1.15 + this.playerY, -2.0);
     this.headlightSpot.target.position.set(this.playerX, 0.2, -38);
-    this.headlightSpot.intensity =
-      (worldDef.isNight ? 6.5 : 1.8) * (this.health <= 24 ? 0.45 : 1.0);
+    this.headlightSpot.intensity = worldDef.isNight ? 6.5 : 1.8;
 
     this.scrollRoadSegments(moveDz);
     this.updateWeatherAndSpeedLines(dt, this.speedUnits, this.nitroActive);
 
-    // Update Boss Chase if active
-    if (this.bossActive) {
-      this.updateBossChase(dt, moveDz, carStats.damageResistance);
-    }
-
-    const difficultyDensity = 1 + Math.min(0.85, this.distanceM / 3500);
-    const spawnInterval =
-      Math.max(0.42, 1.18 / (difficultyDensity * modeDef.trafficDensityScale));
-    this.spawnTimer -= dt;
-    if (this.spawnTimer <= 0) {
-      this.spawnTimer = spawnInterval * (0.8 + Math.random() * 0.45);
-      this.spawnFairTrafficWave(difficultyDensity);
+    const diffInterval = Math.max(0.55, 1.38 - Math.min(0.68, this.distanceM * 0.00018));
+    this.trafficSpawnTimer -= dt;
+    if (this.trafficSpawnTimer <= 0) {
+      this.trafficSpawnTimer = (diffInterval + Math.random() * 0.45) / modeDef.trafficDensityScale;
+      this.spawnFairTrafficWave(-315);
     }
 
     this.coinSpawnTimer -= dt;
     if (this.coinSpawnTimer <= 0) {
-      this.coinSpawnTimer = Math.max(0.55, 1.45 / modeDef.coinSpawnScale);
+      this.coinSpawnTimer = Math.max(0.45, 1.2 / modeDef.coinSpawnScale);
       this.spawnCoinArc();
     }
 
     this.pickupSpawnTimer -= dt;
     if (this.pickupSpawnTimer <= 0) {
-      this.pickupSpawnTimer = 5.2 + Math.random() * 4.5;
+      this.pickupSpawnTimer = 5.0 + Math.random() * 4.2;
       this.spawnRepairOrPowerUp();
     }
 
-    const empOrWarpSlow =
-      this.abilityActiveRemaining > 0 && (abId === 'emp_pulse' || abId === 'time_warp');
-    const slowScale = this.slowMoRemaining > 0 ? 0.48 : empOrWarpSlow ? 0.42 : 1.0;
-    const effectiveRepairMult =
-      abId === 'aero_downforce' ? carStats.repairEfficiency * 1.35 : carStats.repairEfficiency;
-    this.updateTraffic(dt, moveDz, slowScale, carStats.damageResistance);
+    const baseRepairMult =
+      abId === 'aero_downforce'
+        ? carStats.repairEfficiency * 1.35
+        : abId === 'medic_siren'
+          ? carStats.repairEfficiency * 1.15
+          : carStats.repairEfficiency;
+
+    this.updateTraffic(dt, moveDz, speedKmh, ghostPhaseActive);
     this.updateCoins(dt, moveDz, worldDef.coinMultiplier * modeDef.coinMultiplier);
-    this.updateRepairs(dt, moveDz, effectiveRepairMult);
-    this.updatePowerUps(dt, moveDz, effectiveRepairMult);
+    this.updateRepairs(dt, moveDz, baseRepairMult);
+    this.updatePowerUps(dt, moveDz, baseRepairMult);
     this.updateParticles(dt);
 
     audioEngine.updateEngine(
@@ -1484,126 +1539,346 @@ export class WrongWayEngine {
     }
   }
 
-  private updateBossChase(dt: number, moveDz: number, damageResistance: number): void {
-    if (!this.bossRig) return;
-    this.bossTimer -= dt;
-    if (this.bossHitCooldown > 0) this.bossHitCooldown = Math.max(0, this.bossHitCooldown - dt);
-
-    // Boss weaves ahead at z ~ -16..-24, occasionally closing in to block
-    this.bossMoveCooldown -= dt;
-    if (this.bossMoveCooldown <= 0.8 && this.bossMoveCooldown > 0) {
-      this.bossWarningText = 'BOSS SWERVING!';
-    }
-    if (this.bossMoveCooldown <= 0) {
-      this.bossMoveCooldown = 2.4 + Math.random() * 1.4;
-      this.bossWarningText = null;
-      // Pick lane near player or adjacent open lane
-      const shift = Math.random() > 0.35 ? Math.sign(this.playerX - this.bossX) || 1 : (Math.random() > 0.5 ? 1 : -1);
-      this.bossLane = Math.max(0, Math.min(LANE_COUNT - 1, this.bossLane + shift));
-    }
-
-    const targetBossX = getLaneCenterX(this.bossLane);
-    this.bossX = THREE.MathUtils.damp(this.bossX, targetBossX, 4.5, dt);
-
-    // Nitro pushes the boss farther ahead
-    const desiredBossZ = this.nitroActive ? -32 : -15 - Math.sin(performance.now() * 0.002) * 4;
-    this.bossZ = THREE.MathUtils.damp(this.bossZ, desiredBossZ, 2.5, dt);
-
-    this.bossRig.group.position.set(this.bossX, 0, this.bossZ);
-    for (const w of this.bossRig.wheels) {
-      w.rotation.x -= moveDz * 2.4;
-    }
-
-    const blink = Math.floor(performance.now() / 120) % 2 === 0;
-    this.bossRig.beaconLeft.visible = blink;
-    this.bossRig.beaconRight.visible = !blink;
-
-    // Boss collision check
-    if (this.bossHitCooldown <= 0) {
-      const dx = Math.abs(this.bossX - this.playerX);
-      const dz = Math.abs(this.bossZ);
-      if (dx < 1.85 && dz < 4.4) {
-        this.bossHitCooldown = 1.6;
-        if (this.shieldRemaining > 0) {
-          this.shieldRemaining = 0;
-          this.spawnSparks(this.bossX, 0.9, this.bossZ, 26);
-          audioEngine.playShieldBreak();
-          this.pushNotification('SHIELD DEFLECTED BOSS RAM', 'cyan');
-        } else {
-          const dmg = Math.max(10, Math.round(25 * (1 - damageResistance)));
-          this.applyDamageToPlayer(dmg, 'heavy', 'BOSS IMPACT');
-        }
+  private isLaneOccupiedNear(lane: number, zCenter: number, minGap = 24): boolean {
+    const lx = getLaneCenterX(lane);
+    for (const v of this.trafficPool) {
+      if (v.active && !v.smashed && Math.abs(v.x - lx) < 2.2 && Math.abs(v.z - zCenter) < minGap) {
+        return true;
       }
     }
+    return false;
+  }
 
-    if (this.bossTimer <= 0) {
-      this.bossActive = false;
-      this.bossEscapedThisRun = true;
-      this.bossRig.group.visible = false;
-      this.bossWarningText = null;
-      const bossMeta = getBossById(this.activeBossType);
-      this.runCoins += bossMeta.rewardCoins;
-      this.modeBonusClaimed = true;
-      audioEngine.playUnlock();
-      this.triggerHaptic([40, 40, 100]);
-      this.pushNotification(`ESCAPED BOSS · +${bossMeta.rewardCoins} COINS!`, 'emerald');
+  private spawnFairTrafficWave(zBase = -315, excludedLane = -1): void {
+    const modeDef = getModeById(this.activeModeId);
+    const maxCars =
+      this.distanceM > 1400
+        ? 4
+        : this.distanceM > 450
+          ? 3
+          : 2;
+    const rawCount = 1 + Math.floor(Math.random() * maxCars);
+    const desiredCount = Math.min(
+      4,
+      Math.max(1, Math.round(rawCount * Math.min(1.4, modeDef.trafficDensityScale))),
+    );
+
+    // Shuffle all 6 lanes; always leave at least 2 open escape lanes
+    const lanes = [0, 1, 2, 3, 4, 5];
+    for (let i = lanes.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = lanes[i];
+      lanes[i] = lanes[j];
+      lanes[j] = tmp;
     }
-  }
 
-  private isLaneClearAtZ(lane: number, zMin: number, zMax: number): boolean {
-    for (const t of this.trafficPool) {
-      if (!t.active) continue;
-      if (t.lane === lane || t.targetLane === lane) {
-        if (t.z + t.rig.halfLength + 12 >= zMin && t.z - t.rig.halfLength - 12 <= zMax) {
-          return false;
-        }
-      }
-    }
-    return true;
-  }
+    let spawned = 0;
+    for (const lane of lanes) {
+      if (spawned >= desiredCount) break;
+      if (lane === excludedLane) continue;
+      const laneX = getLaneCenterX(lane);
+      const zPos = zBase - Math.random() * 14;
+      if (this.isLaneOccupiedNear(lane, zPos, 26)) continue;
 
-  private spawnFairTrafficWave(difficultyScale: number): void {
-    return;
-  }
-      slot.rig.signalLeft.visible = false;
-      slot.rig.signalRight.visible = false;
+      const inactiveList = this.trafficPool.filter((t) => !t.active);
+      if (inactiveList.length === 0) break;
+      const slot = inactiveList[Math.floor(Math.random() * inactiveList.length)];
 
-      const typeSpeed =
-        slot.type === 'supercar' || slot.type === 'sports'
-          ? 36 + Math.random() * 10
-          : slot.type === 'motorbike'
-            ? 38 + Math.random() * 12
-            : slot.type === 'truck' || slot.type === 'bus' || slot.type === 'limousine'
-              ? 21 + Math.random() * 6
-              : 26 + Math.random() * 9;
-      slot.speed = typeSpeed * (0.9 + difficultyScale * 0.14);
+      slot.active = true;
+      slot.lane = lane;
+      slot.targetLane = lane;
+      slot.x = laneX;
+      slot.z = zPos;
+      slot.nearMissed = false;
+      slot.smashed = false;
+      slot.smashVx = 0;
+      slot.smashSpin = 0;
+      slot.laneShiftAttempted = false;
+      slot.signalTimer = 0;
 
-      slot.laneChangeTimer =
-        this.distanceM > 320 && Math.random() < 0.28 ? 1.8 + Math.random() * 2.0 : -1;
+      const baseTrafficSpeed =
+        slot.type === 'bus' || slot.type === 'truck' || slot.type === 'fire_truck'
+          ? 17 + Math.random() * 5
+          : slot.type === 'supercar' || slot.type === 'sports' || slot.type === 'police'
+            ? 26 + Math.random() * 10
+            : 21 + Math.random() * 7;
+      slot.speedUnits = baseTrafficSpeed + Math.min(8, this.distanceM * 0.0018);
 
       slot.rig.group.position.set(slot.x, 0, slot.z);
       slot.rig.group.rotation.set(0, 0, 0);
+      slot.rig.signalLeft.visible = false;
+      slot.rig.signalRight.visible = false;
       slot.rig.group.visible = true;
       spawned++;
     }
   }
 
-  private findInactiveTraffic(): PooledTraffic | null {
-    const start = Math.floor(Math.random() * this.trafficPool.length);
-    for (let i = 0; i < this.trafficPool.length; i++) {
-      const item = this.trafficPool[(start + i) % this.trafficPool.length];
-      if (!item.active) return item;
+  private updateTraffic(
+    dt: number,
+    playerDz: number,
+    speedKmh: number,
+    ghostPhaseActive: boolean,
+  ): void {
+    const carDef = getCarById(this.activeCarId);
+    const carStats = this.getCurrentCarStats();
+    const abId = carDef.ability.id;
+    const playerHalfW = this.playerRig?.halfWidth ?? 0.9;
+    const playerHalfL = this.playerRig?.halfLength ?? 2.2;
+    const slowFactor = this.slowMoRemaining > 0 ? 0.52 : 1.0;
+    const canSmash =
+      this.shieldRemaining > 0 ||
+      (this.abilityActiveRemaining > 0 &&
+        (abId === 'fire_shield' ||
+          abId === 'shockwave_ram' ||
+          abId === 'vip_convoy' ||
+          abId === 'quad_overdrive'));
+    const flashOn = Math.floor(performance.now() / 135) % 2 === 0;
+
+    for (const v of this.trafficPool) {
+      if (!v.active) continue;
+
+      if (v.smashed) {
+        v.x += v.smashVx * dt;
+        v.z += playerDz * 0.55 - 24 * dt;
+        v.rig.group.position.x = v.x;
+        v.rig.group.position.y = Math.max(0, v.rig.group.position.y + 4.5 * dt);
+        v.rig.group.position.z = v.z;
+        v.rig.group.rotation.y += v.smashSpin * dt;
+        v.rig.group.rotation.z += v.smashSpin * 0.4 * dt;
+        if (v.z > 25 || Math.abs(v.x) > 28) {
+          v.active = false;
+          v.rig.group.visible = false;
+        }
+        continue;
+      }
+
+      v.z += playerDz + v.speedUnits * dt * slowFactor;
+
+      // Occasional signaled lane change on higher distance runs (only cars/SUVs)
+      if (
+        !v.laneShiftAttempted &&
+        this.distanceM > 700 &&
+        v.z > -145 &&
+        v.z < -75 &&
+        v.type !== 'bus' &&
+        v.type !== 'truck' &&
+        v.type !== 'fire_truck' &&
+        v.type !== 'limousine' &&
+        Math.random() < 0.015
+      ) {
+        v.laneShiftAttempted = true;
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        const candidateLane = v.lane + dir;
+        if (
+          candidateLane >= 0 &&
+          candidateLane < LANE_COUNT &&
+          !this.isLaneOccupiedNear(candidateLane, v.z, 28)
+        ) {
+          v.targetLane = candidateLane;
+          v.signalTimer = 0.6;
+        }
+      }
+
+      if (v.signalTimer > 0) {
+        v.signalTimer -= dt;
+        const blink = Math.floor(v.signalTimer * 10) % 2 === 0;
+        v.rig.signalLeft.visible = v.targetLane < v.lane && blink;
+        v.rig.signalRight.visible = v.targetLane > v.lane && blink;
+      } else if (v.targetLane !== v.lane) {
+        v.rig.signalLeft.visible = false;
+        v.rig.signalRight.visible = false;
+        const destX = getLaneCenterX(v.targetLane);
+        v.x = THREE.MathUtils.damp(v.x, destX, 5.5, dt);
+        if (Math.abs(v.x - destX) < 0.08) {
+          v.lane = v.targetLane;
+        }
+      }
+
+      v.rig.group.position.set(v.x, 0, v.z);
+      for (const w of v.rig.wheels) {
+        w.rotation.x += v.speedUnits * dt * 2.2;
+      }
+      if (v.rig.emergencyLights.length === 2) {
+        v.rig.emergencyLights[0].visible = flashOn;
+        v.rig.emergencyLights[1].visible = !flashOn;
+      }
+
+      // Collision / Jump-Over / Smash / Ghost Check
+      const dx = Math.abs(v.x - this.playerX);
+      const dz = Math.abs(v.z);
+      const hitW = v.rig.halfWidth + playerHalfW - 0.16;
+      const hitL = v.rig.halfLength + playerHalfL - 0.25;
+
+      if (dx < hitW && dz < hitL) {
+        if (this.playerY > v.rig.heightClearance) {
+          if (!v.nearMissed) {
+            v.nearMissed = true;
+            this.nearMisses += 1;
+            this.score += 500;
+            this.pushNotification('OVER-TRAFFIC STUNT! +500 SCORE', 'cyan');
+            audioEngine.playNearMiss(this.comboCount + 1);
+          }
+        } else if (ghostPhaseActive) {
+          // Phasing cleanly through oncoming vehicle
+          if (!v.nearMissed) {
+            v.nearMissed = true;
+            this.nearMisses += 1;
+            this.score += 300;
+            this.pushNotification('SIREN PHASE PASS! +300 SCORE', 'cyan');
+          }
+        } else if (canSmash) {
+          v.smashed = true;
+          v.nearMissed = true;
+          v.smashVx = (v.x >= this.playerX ? 1 : -1) * (14 + Math.random() * 8);
+          v.smashSpin = (v.x >= this.playerX ? -1 : 1) * 7.5;
+          this.smashes += 1;
+          this.score += 650;
+          this.cameraShake = Math.max(this.cameraShake, 0.45);
+          this.spawnSparks((this.playerX + v.x) * 0.5, 0.9, v.z * 0.5, 22);
+          audioEngine.playCrash('medium');
+          this.triggerHaptic([18, 18]);
+          this.pushNotification('TRAFFIC SMASH! +650 SCORE', 'amber');
+        } else if (this.damageCooldown <= 0) {
+          const isHeavy = v.type === 'bus' || v.type === 'truck' || v.type === 'fire_truck';
+          const baseDmg =
+            speedKmh < 165 || v.type === 'motorbike'
+              ? 10
+              : speedKmh < 245 && !isHeavy
+                ? 20
+                : 35;
+          const tacticalMult = abId === 'tactical_armor' ? 0.75 : 1.0;
+          const dmg = Math.max(4, Math.round(baseDmg * (1 - carStats.damageResistance) * tacticalMult));
+
+          this.health = Math.max(0, this.health - dmg);
+          this.damageCooldown = 1.35;
+          this.damageFlash = 1.0;
+          this.cameraShake = 1.0;
+          this.hitstopTimer = 0.055;
+          this.speedUnits = Math.max(24, this.speedUnits * 0.62);
+          this.noDamageRunDist = 0;
+          this.crashesTaken += 1;
+          this.comboCount = 0;
+          this.comboTimer = 0;
+
+          if (this.playerRig) {
+            const ov = this.playerRig.damageOverlays;
+            if (ov[0]) ov[0].visible = this.health < 75;
+            if (ov[1]) ov[1].visible = this.health < 50;
+            if (ov[2]) ov[2].visible = this.health < 25;
+          }
+
+          this.spawnSparks((this.playerX + v.x) * 0.5, 0.85, -1.2, 28);
+          audioEngine.playCrash(baseDmg >= 35 ? 'heavy' : baseDmg >= 20 ? 'medium' : 'small');
+          this.triggerHaptic([35, 30, 65]);
+          this.pushNotification(`CRASH IMPACT · -${dmg} HP`, 'rose');
+
+          if (this.health <= 0) {
+            this.triggerCrashGameOver();
+            return;
+          }
+        }
+      } else if (!v.nearMissed && v.z > 2.2 && v.z < 10.5) {
+        if (dx < hitW + 1.85) {
+          v.nearMissed = true;
+          this.nearMisses += 1;
+          this.comboCount = Math.min(5, this.comboCount + 1);
+          this.comboTimer = 4.5;
+          if (this.comboCount > this.maxCombo) this.maxCombo = this.comboCount;
+
+          let bonusScore = 150 * this.comboCount;
+          if (abId === 'quick_snap') bonusScore = Math.round(bonusScore * 1.25);
+          this.score += bonusScore;
+          audioEngine.playNearMiss(this.comboCount);
+          this.triggerHaptic(14);
+          this.pushNotification(
+            this.comboCount > 1
+              ? `NEAR MISS x${this.comboCount} · +${bonusScore} SCORE`
+              : `NEAR MISS · +${bonusScore} SCORE`,
+            'amber',
+          );
+
+          if (this.tutorialStep === 2) {
+            this.tutorialStep = -1;
+            this.callbacks.onTutorialComplete();
+          }
+        }
+      }
+
+      if (v.z > 22) {
+        v.active = false;
+        v.rig.group.visible = false;
+      }
     }
-    return null;
+  }
+
+  private triggerStuntJump(rampType: StuntRampType = 'standard'): void {
+    this.stuntJumps += 1;
+    this.comboCount = Math.min(5, this.comboCount + 1);
+    this.comboTimer = 4.8;
+    if (this.comboCount > this.maxCombo) this.maxCombo = this.comboCount;
+
+    const abId = getCarById(this.activeCarId).ability.id;
+    let bonusScore = 300 * this.comboCount;
+
+    if (rampType === 'super_launch') {
+      bonusScore = Math.round(bonusScore * 2.5);
+    } else if (rampType === 'dual_ramp') {
+      bonusScore = Math.round(bonusScore * 1.6);
+    }
+
+    if (abId === 'quick_snap') bonusScore = Math.round(bonusScore * 1.25);
+    if (abId === 'steady_grip') bonusScore = Math.round(bonusScore * 1.3);
+    if (abId === 'track_precision' && this.comboCount >= 2) {
+      bonusScore *= 2;
+    }
+    if (abId === 'slipstream') {
+      this.nitroAmount = Math.min(1, this.nitroAmount + 0.18);
+    }
+
+    this.score += bonusScore;
+    this.spawnSparks(this.playerX, 0.4, 0, rampType === 'super_launch' ? 32 : 20);
+
+    if (this.tutorialStep === 2) {
+      this.tutorialStep = -1;
+      this.callbacks.onTutorialComplete();
+    }
+
+    audioEngine.playPowerUp('nitro');
+    this.triggerHaptic(rampType === 'super_launch' ? [40, 30, 50] : 24);
+
+    if (rampType === 'super_launch') {
+      this.pushNotification(
+        `SUPER MEGA LAUNCH x${this.comboCount} · +${bonusScore} SCORE`,
+        'cyan',
+      );
+    } else if (rampType === 'dual_ramp') {
+      this.pushNotification(
+        `DUAL RAMP CAR JUMP x${this.comboCount} · +${bonusScore} SCORE`,
+        'emerald',
+      );
+    } else {
+      this.pushNotification(
+        this.comboCount > 1
+          ? `HIGHWAY JUMP RAMP x${this.comboCount} · +${bonusScore} SCORE`
+          : `STUNT RAMP LAUNCH · +${bonusScore} SCORE`,
+        'amber',
+      );
+    }
   }
 
   private spawnCoinArc(): void {
-    const lane = Math.floor(Math.random() * LANE_COUNT);
+    let lane = Math.floor(Math.random() * LANE_COUNT);
     const zBase = -320 - Math.random() * 40;
+    for (let attempt = 0; attempt < LANE_COUNT; attempt++) {
+      const candidate = (lane + attempt) % LANE_COUNT;
+      if (!this.isLaneOccupiedNear(candidate, zBase, 14)) {
+        lane = candidate;
+        break;
+      }
+    }
     const count = 4 + Math.floor(Math.random() * 4);
     for (let i = 0; i < count; i++) {
       const zPos = zBase - i * 4.5;
-      if (!this.isLaneClearAtZ(lane, zPos - 5, zPos + 5)) continue;
       const coin = this.coinPool.find((c) => !c.active);
       if (!coin) break;
       coin.active = true;
@@ -1615,17 +1890,23 @@ export class WrongWayEngine {
   }
 
   private spawnRepairOrPowerUp(): void {
-    const lane = Math.floor(Math.random() * LANE_COUNT);
+    let lane = Math.floor(Math.random() * LANE_COUNT);
     const zPos = -335 - Math.random() * 30;
-    if (!this.isLaneClearAtZ(lane, zPos - 14, zPos + 14)) return;
+    for (let attempt = 0; attempt < LANE_COUNT; attempt++) {
+      const candidate = (lane + attempt) % LANE_COUNT;
+      if (!this.isLaneOccupiedNear(candidate, zPos, 16)) {
+        lane = candidate;
+        break;
+      }
+    }
 
-    const repairChance = this.health < 45 ? 0.52 : 0.34;
+    const repairChance = this.health < 75 ? 0.38 : 0.24;
     if (Math.random() < repairChance) {
       const roll = Math.random();
       let desiredTier: RepairPickupTier = 'small';
-      if (roll > 0.96) desiredTier = 'legendary';
-      else if (roll > 0.83) desiredTier = 'large';
-      else if (roll > 0.55) desiredTier = 'medium';
+      if (roll > 0.94) desiredTier = 'legendary';
+      else if (roll > 0.78) desiredTier = 'large';
+      else if (roll > 0.48) desiredTier = 'medium';
 
       const slot =
         this.repairPool.find((r) => !r.active && r.tier === desiredTier) ??
@@ -1637,9 +1918,7 @@ export class WrongWayEngine {
       slot.mesh.position.set(slot.x, 1.1, slot.z);
       slot.mesh.visible = true;
     } else {
-      const desiredTypes: PowerUpType[] = this.bossActive
-        ? ['nitro', 'shield', 'nitro', 'slow_mo', 'emergency_repair']
-        : ['nitro', 'magnet', 'shield', 'slow_mo', 'emergency_repair'];
+      const desiredTypes: PowerUpType[] = ['nitro', 'magnet', 'shield', 'slow_mo', 'emergency_repair'];
       const pick = desiredTypes[Math.floor(Math.random() * desiredTypes.length)];
       const slot =
         this.powerUpPool.find((p) => !p.active && p.type === pick) ??
@@ -1651,232 +1930,6 @@ export class WrongWayEngine {
       slot.mesh.position.set(slot.x, 1.15, slot.z);
       slot.mesh.visible = true;
     }
-  }
-
-  private updateTraffic(
-    dt: number,
-    playerDz: number,
-    slowScale: number,
-    damageResistance: number,
-  ): void {
-    for (const t of this.trafficPool) {
-      t.active = false;
-      t.rig.group.visible = false;
-    }
-  }
-
-      const wheelRot = t.speed * slowScale * dt * 2.1;
-      for (const w of t.rig.wheels) {
-        w.rotation.x += wheelRot;
-      }
-
-      if (t.laneChangeTimer > 0 && t.z < -45 && t.z > -220) {
-        t.laneChangeTimer -= dt * slowScale;
-        if (t.laneChangeTimer <= 1.0 && t.telegraphingDir === 0) {
-          const tryDir = Math.random() > 0.5 ? 1 : -1;
-          const nextL = t.lane + tryDir;
-          if (
-            nextL >= 0 &&
-            nextL < LANE_COUNT &&
-            this.isLaneClearAtZ(nextL, t.z - 22, t.z + 22)
-          ) {
-            t.telegraphingDir = tryDir as -1 | 1;
-          } else {
-            t.laneChangeTimer = -1;
-          }
-        }
-        if (t.telegraphingDir !== 0) {
-          const blink = Math.floor(performance.now() / 130) % 2 === 0;
-          t.rig.signalLeft.visible = t.telegraphingDir < 0 && blink;
-          t.rig.signalRight.visible = t.telegraphingDir > 0 && blink;
-        }
-        if (t.laneChangeTimer <= 0 && t.telegraphingDir !== 0) {
-          t.targetLane = Math.max(0, Math.min(LANE_COUNT - 1, t.lane + t.telegraphingDir));
-          t.lane = t.targetLane;
-          t.telegraphingDir = 0;
-          t.rig.signalLeft.visible = false;
-          t.rig.signalRight.visible = false;
-        }
-      }
-
-      const targetX = getLaneCenterX(t.targetLane);
-      t.x = THREE.MathUtils.damp(t.x, targetX, 6.5, dt * slowScale);
-      t.rig.group.position.set(t.x, 0, t.z);
-
-      if (!t.collided) {
-        const dx = Math.abs(t.x - this.playerX);
-        const dz = Math.abs(t.z);
-        const abId = getCarById(this.activeCarId).ability.id;
-        const nearMissCorridor = abId === 'steady_grip' ? LANE_WIDTH * 1.35 : LANE_WIDTH * 1.18;
-        if (dx < pHalfW + t.rig.halfWidth && dz < pHalfL + t.rig.halfLength) {
-          t.collided = true;
-          this.handleTrafficCollision(t, dx, damageResistance);
-        } else if (!t.nearMissed && t.z > pHalfL + t.rig.halfLength + 0.5) {
-          if (dx < nearMissCorridor) {
-            t.nearMissed = true;
-            this.triggerNearMiss();
-          }
-        }
-      }
-
-      if (t.z > 28) {
-        t.active = false;
-        t.rig.group.visible = false;
-      }
-    }
-  }
-
-  private applyDamageToPlayer(
-    finalDamage: number,
-    severity: 'small' | 'medium' | 'heavy',
-    label: string,
-  ): void {
-    this.health = Math.max(0, this.health - finalDamage);
-    this.damageCooldown = 1.15;
-    this.damageFlash = 1.0;
-    this.noDamageRunDist = 0;
-    this.crashesTaken += 1;
-    this.comboCount = 0;
-    this.comboTimer = 0;
-    this.nitroActive = false;
-
-    const abId = getCarById(this.activeCarId).ability.id;
-    const rawSpeedDrop = severity === 'heavy' ? 0.55 : severity === 'medium' ? 0.72 : 0.86;
-    const speedKeep = abId === 'titanium_armor' ? 1 - (1 - rawSpeedDrop) * 0.5 : rawSpeedDrop;
-    this.speedUnits *= speedKeep;
-    this.cameraShake = severity === 'heavy' ? 1.15 : severity === 'medium' ? 0.7 : 0.35;
-    this.hitstopTimer = severity === 'heavy' ? 0.055 : 0.03;
-
-    audioEngine.playCrash(severity);
-    this.triggerHaptic(severity === 'heavy' ? [60, 30, 90] : severity === 'medium' ? 45 : 25);
-    this.pushNotification(`${label} · -${finalDamage} HP`, 'rose');
-
-    if (this.health <= 0) {
-      this.triggerCrashGameOver();
-    } else {
-      this.emitHud();
-    }
-  }
-
-  private handleTrafficCollision(
-    t: PooledTraffic,
-    lateralOverlapDist: number,
-    damageResistance: number,
-  ): void {
-    const abId = getCarById(this.activeCarId).ability.id;
-    const ghostPhaseActive =
-      this.abilityActiveRemaining > 0 &&
-      (abId === 'phase_ghost' || abId === 'phantom_blink' || abId === 'sovereign_zenith');
-    if (ghostPhaseActive) {
-      this.score += 100;
-      this.triggerNearMiss();
-      return;
-    }
-
-    const ramBarrierActive =
-      this.abilityActiveRemaining > 0 && (abId === 'shockwave_ram' || abId === 'vip_convoy');
-    if (ramBarrierActive) {
-      this.smashes += 1;
-      const ramCoins = abId === 'shockwave_ram' ? 60 : 45;
-      this.runCoins += ramCoins;
-      this.score += 300;
-      this.spawnSparks(t.x, 0.85, t.z, 32);
-      t.active = false;
-      t.rig.group.visible = false;
-      this.cameraShake = 0.45;
-      audioEngine.playShieldBreak();
-      this.triggerHaptic(32);
-      this.pushNotification(`ABILITY SMASH · +${ramCoins} COINS`, 'amber');
-      this.emitHud();
-      return;
-    }
-
-    if (this.shieldRemaining > 0) {
-      this.shieldRemaining = 0;
-      this.smashes += 1;
-      this.runCoins += 40;
-      this.score += 250;
-      this.spawnSparks(t.x, 0.85, t.z, 32);
-      t.active = false;
-      t.rig.group.visible = false;
-      this.cameraShake = 0.55;
-      this.hitstopTimer = 0.04;
-      audioEngine.playShieldBreak();
-      this.triggerHaptic(35);
-      this.pushNotification('SHIELD SMASH · +40 COINS', 'cyan');
-      this.emitHud();
-      return;
-    }
-
-    if (this.damageCooldown > 0) {
-      t.active = false;
-      t.rig.group.visible = false;
-      this.spawnSparks(t.x, 0.7, t.z, 14);
-      return;
-    }
-
-    const speedKmh = this.speedUnits * 3.6;
-    let baseDamage = 20;
-    let severity: 'small' | 'medium' | 'heavy' = 'medium';
-    let label = 'COLLISION';
-
-    const isHeavyVehicle = t.type === 'truck' || t.type === 'bus' || t.type === 'limousine';
-    if (lateralOverlapDist > 1.05 && !this.nitroActive && !isHeavyVehicle) {
-      baseDamage = 10;
-      severity = 'small';
-      label = 'MINOR SCRAPE';
-    } else if ((speedKmh >= 300 || (isHeavyVehicle && speedKmh >= 220)) && lateralOverlapDist < 0.55) {
-      baseDamage = 50;
-      severity = 'heavy';
-      label = 'SEVERE CRASH';
-    } else if (speedKmh >= 245 || this.nitroActive || lateralOverlapDist < 0.45) {
-      baseDamage = 35;
-      severity = 'heavy';
-      label = 'HIGH-SPEED CRASH';
-    }
-
-    const finalDamage = Math.max(5, Math.round(baseDamage * (1 - damageResistance)));
-    this.spawnSparks((this.playerX + t.x) * 0.5, 0.85, t.z * 0.5, severity === 'heavy' ? 36 : 20);
-    t.active = false;
-    t.rig.group.visible = false;
-
-    this.applyDamageToPlayer(finalDamage, severity, label);
-  }
-
-  private triggerNearMiss(): void {
-    this.nearMisses += 1;
-    this.comboCount = Math.min(5, this.comboCount + 1);
-    this.comboTimer = 4.0;
-    if (this.comboCount > this.maxCombo) this.maxCombo = this.comboCount;
-
-    const abId = getCarById(this.activeCarId).ability.id;
-    let bonusCoins = 5 * this.comboCount;
-    let bonusScore = 50 * this.comboCount;
-    if (abId === 'quick_snap') bonusCoins = Math.round(bonusCoins * 1.25);
-    if (abId === 'track_precision' && this.comboCount >= 2) {
-      bonusCoins *= 2;
-      bonusScore *= 2;
-    }
-    if (abId === 'slipstream') {
-      this.nitroAmount = Math.min(1, this.nitroAmount + 0.14);
-    }
-
-    this.runCoins += bonusCoins;
-    this.score += bonusScore;
-
-    if (this.tutorialStep === 2) {
-      this.tutorialStep = -1;
-      this.callbacks.onTutorialComplete();
-    }
-
-    audioEngine.playNearMiss(this.comboCount);
-    this.triggerHaptic(18);
-    this.pushNotification(
-      this.comboCount > 1
-        ? `NEAR MISS x${this.comboCount} · +${bonusCoins} COINS`
-        : `NEAR MISS · +${bonusCoins} COINS`,
-      'amber',
-    );
   }
 
   private updateCoins(dt: number, playerDz: number, coinMultiplier: number): void {
@@ -1904,12 +1957,13 @@ export class WrongWayEngine {
 
       c.mesh.position.set(c.x, 0.95 + Math.sin(performance.now() * 0.005 + c.z) * 0.12, c.z);
 
-      if (Math.abs(c.x - this.playerX) < 1.7 && Math.abs(c.z) < 2.6) {
+      if (Math.abs(c.x - this.playerX) < 1.8 && Math.abs(c.z) < 2.7) {
         c.active = false;
         c.mesh.visible = false;
         const val = Math.max(1, Math.round(5 * coinMultiplier * coinAbilityMult));
         this.runCoins += val;
         this.score += 20;
+        this.spawnSparks(c.x, 0.95, c.z, 6);
         audioEngine.playCoin(this.comboCount + 1);
       } else if (c.z > 20) {
         c.active = false;
@@ -1933,14 +1987,10 @@ export class WrongWayEngine {
           r.tier === 'legendary' ? 100 : r.tier === 'large' ? 50 : r.tier === 'medium' ? 25 : 10;
         const finalHeal = r.tier === 'legendary' ? 100 : Math.round(baseHeal * repairEfficiency);
         this.health = Math.min(this.maxHealth, this.health + finalHeal);
+        this.score += 250;
         audioEngine.playRepair(r.tier);
         this.triggerHaptic([20, 20, 40]);
-        this.pushNotification(
-          r.tier === 'legendary'
-            ? 'LEGENDARY REPAIR · FULL 100% HP'
-            : `REPAIR KIT · +${finalHeal} HP`,
-          'emerald',
-        );
+        this.pushNotification(`REPAIR KIT · +${finalHeal} HP & +250 SCORE`, 'emerald');
         this.emitHud();
       } else if (r.z > 20) {
         r.active = false;
@@ -1984,13 +2034,14 @@ export class WrongWayEngine {
       this.pushNotification('ENERGY SHIELD · 10s', 'cyan');
     } else if (type === 'slow_mo') {
       this.slowMoRemaining = 6.5;
-      this.pushNotification('SLOW MOTION · TRAFFIC DAMPENED', 'cyan');
+      this.score += 150;
+      this.pushNotification('CHRONO FLOW · +150 PTS', 'cyan');
     } else if (type === 'emergency_repair') {
       const heal = Math.round(30 * repairEfficiency);
       this.health = Math.min(this.maxHealth, this.health + heal);
-      this.damageCooldown = Math.max(this.damageCooldown, 2.0);
       this.repairsCollected += 1;
-      this.pushNotification(`EMERGENCY REPAIR · +${heal} HP`, 'emerald');
+      this.score += 300;
+      this.pushNotification(`EMERGENCY REPAIR · +${heal} HP & +300 SCORE`, 'emerald');
     }
     this.emitHud();
   }
@@ -2040,8 +2091,14 @@ export class WrongWayEngine {
 
   private updateFollowCamera(dt: number, applySpeedFov: boolean): void {
     const preset: CameraPreset = this.settings.cameraPreset;
-    const targetY = preset === 'low' ? 2.45 : preset === 'high' ? 6.6 : 4.1;
-    const targetZ = preset === 'low' ? 6.4 : preset === 'high' ? 11.4 : 8.4;
+    const aspect = this.camera.aspect || 1.5;
+    const portraitBoost = aspect < 1.0 ? Math.min(1, (1.0 - aspect) / 0.55) : 0;
+    const targetY =
+      (preset === 'low' ? 2.45 : preset === 'high' ? 6.6 : 4.1) +
+      portraitBoost * 0.75 +
+      this.playerY * 0.55;
+    const targetZ =
+      (preset === 'low' ? 6.4 : preset === 'high' ? 11.4 : 8.4) + portraitBoost * 2.6;
     const lookAheadZ = preset === 'low' ? -22 : -18;
 
     const shakeX = (Math.random() - 0.5) * this.cameraShake * 0.9;
@@ -2067,26 +2124,26 @@ export class WrongWayEngine {
     );
 
     if (applySpeedFov) {
-      const desiredFov = this.nitroActive
-        ? 78
-        : 62 + THREE.MathUtils.clamp((this.speedUnits * 3.6 - 160) / 200, 0, 1) * 11;
-      this.camera.fov = THREE.MathUtils.damp(this.camera.fov, desiredFov, 5.5, dt);
+      const baseFov =
+        (this.nitroActive
+          ? 78
+          : 62 + THREE.MathUtils.clamp((this.speedUnits * 3.6 - 160) / 200, 0, 1) * 11) +
+        portraitBoost * 14;
+      this.camera.fov = THREE.MathUtils.damp(this.camera.fov, baseFov, 5.5, dt);
       this.camera.updateProjectionMatrix();
     }
 
-    _tmpVec.set(this.playerX * 0.85, 1.05, lookAheadZ);
+    _tmpVec.set(this.playerX * 0.85, 1.05 + this.playerY * 0.45, lookAheadZ);
     this.camera.lookAt(_tmpVec);
   }
 
   private triggerCrashGameOver(): void {
     if (this.crashPendingSummary) return;
     this.crashPendingSummary = true;
-    this.crashSlowMoTimer = 0.95;
+    this.crashSlowMoTimer = 0.65;
+    this.notifications = [];
     this.nitroActive = false;
     this.braking = false;
-    if (this.playerRig) {
-      this.playerRig.group.visible = true;
-    }
     audioEngine.stopEngine();
     audioEngine.playGameOver();
     this.emitHud();
@@ -2094,16 +2151,19 @@ export class WrongWayEngine {
 
   private finishRunAndReport(): void {
     this.crashPendingSummary = false;
+    this.notifications = [];
     const modeDef = getModeById(this.activeModeId);
     const dist = Math.round(this.distanceM);
     const modeBonus =
       this.activeModeId === 'traffic_challenge' && this.modeBonusClaimed
-        ? 800
-        : this.activeModeId === 'time_trial' && this.modeBonusClaimed
-          ? 650
-          : 0;
+        ? 900
+        : this.activeModeId === 'stunt_challenge' && this.modeBonusClaimed
+          ? 800
+          : this.activeModeId === 'time_trial' && this.modeBonusClaimed
+            ? 650
+            : 0;
     const xpEarned = Math.round(
-      (dist * 0.08 + this.nearMisses * 14 + this.smashes * 18 + (this.bossEscapedThisRun ? 450 : 0)) *
+      (dist * 0.08 + this.stuntJumps * 22 + this.nearMisses * 14 + this.smashes * 18) *
         modeDef.xpMultiplier,
     );
 
@@ -2112,6 +2172,7 @@ export class WrongWayEngine {
       score: Math.round(this.score),
       coinsEarned: this.runCoins,
       nearMisses: this.nearMisses,
+      stuntJumps: this.stuntJumps,
       maxCombo: this.maxCombo,
       maxSpeedKmh: this.maxSpeedKmh,
       xpEarned,
@@ -2122,7 +2183,7 @@ export class WrongWayEngine {
       survivalSeconds: this.survivalSeconds,
       maxNoDamageDistance: this.maxNoDamageDist,
       crashesTaken: this.crashesTaken,
-      bossEscaped: this.bossEscapedThisRun,
+      bossEscaped: false,
       isNewBestDistance: false,
       isNewHighScore: false,
       modeCompleted: this.modeBonusClaimed,
@@ -2137,11 +2198,12 @@ export class WrongWayEngine {
   private emitHud(): void {
     const modeDef = getModeById(this.activeModeId);
     const worldDef = getWorldById(this.activeWorldId);
-    const bossMeta = getBossById(this.activeBossType);
 
     let modeProgressLabel: string | null = null;
     if (this.activeModeId === 'traffic_challenge') {
       modeProgressLabel = `${Math.min(Math.round(this.distanceM), modeDef.targetDistanceM ?? 1500)}m / ${modeDef.targetDistanceM}m · ${Math.min(this.nearMisses, modeDef.targetNearMisses ?? 15)}/${modeDef.targetNearMisses} Near Miss`;
+    } else if (this.activeModeId === 'stunt_challenge') {
+      modeProgressLabel = `${Math.min(Math.round(this.distanceM), modeDef.targetDistanceM ?? 1500)}m / ${modeDef.targetDistanceM}m · ${Math.min(this.stuntJumps, modeDef.targetStuntJumps ?? 6)}/${modeDef.targetStuntJumps} Stunts`;
     } else if (this.activeModeId === 'time_trial') {
       modeProgressLabel = `Target: ${Math.min(Math.round(this.distanceM), modeDef.targetDistanceM ?? 1800)}m / ${modeDef.targetDistanceM}m`;
     } else if (this.activeModeId === 'coin_rush') {
@@ -2158,12 +2220,12 @@ export class WrongWayEngine {
             : 'critical';
 
     const boss: BossHudState = {
-      active: this.bossActive,
-      bossName: bossMeta.name,
-      bossType: this.activeBossType,
-      remainingSec: Math.max(0, Math.ceil(this.bossTimer)),
-      totalSec: this.bossTotalDuration,
-      warningText: this.bossWarningText,
+      active: false,
+      bossName: '',
+      bossType: 'black_hypercar',
+      remainingSec: 0,
+      totalSec: 60,
+      warningText: null,
     };
 
     const carDef = getCarById(this.activeCarId);
@@ -2181,8 +2243,9 @@ export class WrongWayEngine {
       nitroActive: this.nitroActive,
       braking: this.braking,
       comboCount: this.comboCount,
-      comboTimerRatio: Math.max(0, this.comboTimer / 4.0),
+      comboTimerRatio: Math.max(0, this.comboTimer / 4.5),
       nearMisses: this.nearMisses,
+      stuntJumps: this.stuntJumps,
       timeRemainingSec:
         this.timeRemainingSec !== null ? Math.ceil(this.timeRemainingSec) : null,
       modeProgressLabel,
@@ -2250,6 +2313,8 @@ export class WrongWayEngine {
 
     window.removeEventListener('resize', this.handleResize);
     window.removeEventListener('orientationchange', this.handleResize);
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     this.renderer.domElement.removeEventListener('pointerdown', this.handlePointerDown);
     window.removeEventListener('pointermove', this.handlePointerMove);
     window.removeEventListener('pointerup', this.handlePointerUp);
@@ -2257,9 +2322,8 @@ export class WrongWayEngine {
     this.highwayRig?.dispose();
     if (this.playerRig) this.disposeObject3D(this.playerRig.group);
     if (this.showroomCarRig) this.disposeObject3D(this.showroomCarRig.group);
-    if (this.bossRig) this.disposeObject3D(this.bossRig.group);
     this.disposeObject3D(this.showroomGroup);
-    for (const t of this.trafficPool) this.disposeObject3D(t.rig.group);
+    for (const v of this.trafficPool) this.disposeObject3D(v.rig.group);
     for (const c of this.coinPool) this.disposeObject3D(c.mesh);
     for (const r of this.repairPool) this.disposeObject3D(r.mesh);
     for (const p of this.powerUpPool) this.disposeObject3D(p.mesh);

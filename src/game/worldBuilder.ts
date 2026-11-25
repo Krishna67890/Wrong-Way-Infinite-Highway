@@ -1,14 +1,25 @@
 import * as THREE from 'three';
 import {
   createHighwayAsphaltTexture,
+  getLaneCenterX,
+  LANE_COUNT,
   ROAD_WIDTH,
   SEGMENT_LENGTH,
 } from './textures';
-import { WorldDefinition } from './types';
+import { StuntRampType, WorldDefinition } from './types';
 
 export interface RoadSegmentPoolItem {
   group: THREE.Group;
   zStart: number;
+  hasRamp: boolean;
+  rampType: StuntRampType;
+  rampX: number;
+  rampZLocal: number;
+  rampTriggered: boolean;
+  hasHoop: boolean;
+  hoopX: number;
+  hoopZLocal: number;
+  hoopTriggered: boolean;
 }
 
 export interface HighwayEnvironmentRig {
@@ -129,13 +140,96 @@ function buildOverheadGantry(glowHex: string, cyber: boolean): THREE.Group {
   return g;
 }
 
-function buildStuntRamp(): THREE.Group {
+function buildStuntRamp(glowHex: string, rampType: StuntRampType = 'standard'): THREE.Group {
   const g = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.4, metalness: 0.5 });
-  const ramp = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.4, 4.2), mat);
-  ramp.position.set(0, 0.2, 0);
-  ramp.rotation.x = -0.22;
-  g.add(ramp);
+
+  if (rampType === 'super_launch') {
+    // Mega Super Launch Ramp (Cyan / Rose Glow, Higher Incline, Dual Side Rails & Chevrons)
+    const baseMat = new THREE.MeshStandardMaterial({
+      color: 0x0f172a,
+      roughness: 0.25,
+      metalness: 0.85,
+    });
+    const ramp = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.55, 5.2), baseMat);
+    ramp.position.set(0, 0.48, 0);
+    ramp.rotation.x = -0.28;
+    g.add(ramp);
+
+    const glowStrip = new THREE.Mesh(
+      new THREE.BoxGeometry(3.0, 0.08, 5.1),
+      new THREE.MeshBasicMaterial({ color: 0x22d3ee }),
+    );
+    glowStrip.position.set(0, 0.72, 0);
+    glowStrip.rotation.x = -0.28;
+    g.add(glowStrip);
+
+    for (let c = -1.6; c <= 1.6; c += 1.6) {
+      const chevron = new THREE.Mesh(
+        new THREE.BoxGeometry(2.4, 0.09, 0.4),
+        new THREE.MeshBasicMaterial({ color: 0xf43f5e }),
+      );
+      chevron.position.set(0, 0.75 + c * 0.1, c);
+      chevron.rotation.x = -0.28;
+      g.add(chevron);
+    }
+
+    for (const side of [-1, 1]) {
+      const rail = new THREE.Mesh(
+        new THREE.BoxGeometry(0.18, 0.35, 5.3),
+        new THREE.MeshBasicMaterial({ color: 0x38bdf8 }),
+      );
+      rail.position.set(side * 1.62, 0.82, 0);
+      rail.rotation.x = -0.28;
+      g.add(rail);
+    }
+  } else if (rampType === 'dual_ramp') {
+    // Wide Double-Lane Ramp (Emerald / Cyan, Spans 2 Lanes)
+    const baseMat = new THREE.MeshStandardMaterial({
+      color: 0x064e3b,
+      roughness: 0.4,
+      metalness: 0.6,
+    });
+    const ramp = new THREE.Mesh(new THREE.BoxGeometry(5.8, 0.45, 4.8), baseMat);
+    ramp.position.set(0, 0.4, 0);
+    ramp.rotation.x = -0.22;
+    g.add(ramp);
+
+    const glowStrip = new THREE.Mesh(
+      new THREE.BoxGeometry(5.5, 0.08, 4.7),
+      new THREE.MeshBasicMaterial({ color: 0x10b981 }),
+    );
+    glowStrip.position.set(0, 0.62, 0);
+    glowStrip.rotation.x = -0.22;
+    g.add(glowStrip);
+
+    const centerStrip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.2, 0.1, 4.7),
+      new THREE.MeshBasicMaterial({ color: 0x67e8f9 }),
+    );
+    centerStrip.position.set(0, 0.64, 0);
+    centerStrip.rotation.x = -0.22;
+    g.add(centerStrip);
+  } else {
+    // Standard Amber Highway Launch Ramp
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xf59e0b,
+      roughness: 0.35,
+      metalness: 0.45,
+    });
+    const ramp = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.42, 4.8), mat);
+    ramp.position.set(0, 0.38, 0);
+    ramp.rotation.x = -0.22;
+    g.add(ramp);
+
+    const glowStrip = new THREE.Mesh(
+      new THREE.BoxGeometry(2.6, 0.08, 4.7),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(glowHex) }),
+    );
+    glowStrip.position.set(0, 0.6, 0);
+    glowStrip.rotation.x = -0.22;
+    g.add(glowStrip);
+  }
+
   return g;
 }
 
@@ -163,10 +257,10 @@ function buildSuspensionBridgeArch(glowHex: string): THREE.Group {
 
 function buildStuntHoop(glowHex: string): THREE.Group {
   const g = new THREE.Group();
-  const ringGeo = new THREE.TorusGeometry(3.2, 0.22, 8, 24);
+  const ringGeo = new THREE.TorusGeometry(2.75, 0.2, 8, 24);
   const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(glowHex) });
   const ring = new THREE.Mesh(ringGeo, ringMat);
-  ring.position.set(0, 4.5, 0);
+  ring.position.set(0, 3.6, 0);
   g.add(ring);
   return g;
 }
@@ -331,26 +425,59 @@ export function buildHighwayEnvironment(
       segGroup.add(lampR);
     }
 
-    // Overhead highway bridges / gantries every 3rd segment
+    // Overhead highway bridges / gantries
     if (i % 3 === 0) {
       const gantry = buildOverheadGantry(world.accentGlow, world.propTheme === 'cyber');
       segGroup.add(gantry);
     }
-
-    if (i % 4 === 1) {
-      const ramp = buildStuntRamp();
-      ramp.position.set(ROAD_WIDTH * 0.32, 0, -SEGMENT_LENGTH * 0.4);
-      segGroup.add(ramp);
-    }
     if (i % 6 === 2) {
       const bridge = buildSuspensionBridgeArch(world.accentGlow);
-      bridge.position.set(0, 0, 0);
       segGroup.add(bridge);
     }
-    if (i % 5 === 3) {
-      const hoop = buildStuntHoop(world.accentGlow);
-      hoop.position.set(0, 0, -SEGMENT_LENGTH * 0.3);
-      segGroup.add(hoop);
+
+    // Interactive Stunt Ramps & Airborne Hoops (In-Lane & Shoulder placement)
+    let hasRamp = false;
+    let rampType: StuntRampType = 'standard';
+    let rampX = 0;
+    const rampZLocal = -SEGMENT_LENGTH * 0.15;
+    let hasHoop = false;
+    let hoopX = 0;
+    const hoopZLocal = -SEGMENT_LENGTH * 0.42;
+
+    if (i > 1 && (i % 2 === 1 || i % 3 === 1)) {
+      hasRamp = true;
+      const rVal = ((i * 17) % 100) / 100;
+      if (rVal < 0.28) {
+        rampType = 'super_launch';
+      } else if (rVal < 0.55) {
+        rampType = 'dual_ramp';
+      } else {
+        rampType = 'standard';
+      }
+
+      // 75% placement in active highway driving lanes (0..5), 25% on shoulders
+      const inLane = i % 4 !== 0;
+      if (inLane) {
+        const laneIdx = (i * 2 + 1) % LANE_COUNT;
+        rampX = getLaneCenterX(laneIdx);
+      } else {
+        const sideSign = i % 2 === 0 ? 1 : -1;
+        rampX = sideSign * (ROAD_WIDTH * 0.5 + 0.9);
+      }
+
+      const ramp = buildStuntRamp(world.accentGlow, rampType);
+      ramp.position.set(rampX, 0, rampZLocal);
+      segGroup.add(ramp);
+
+      if (i % 2 === 1 || rampType === 'super_launch') {
+        hasHoop = true;
+        hoopX = rampX;
+        const hoopY = rampType === 'super_launch' ? 5.2 : 3.6;
+        const hoopGlow = rampType === 'super_launch' ? '#f43f5e' : world.accentGlow;
+        const hoop = buildStuntHoop(hoopGlow);
+        hoop.position.set(hoopX, hoopY, hoopZLocal);
+        segGroup.add(hoop);
+      }
     }
 
     for (let p = 0; p < propDensity; p++) {
@@ -370,7 +497,6 @@ export function buildHighwayEnvironment(
         } else if (world.propTheme === 'snow') {
           prop = Math.random() > 0.35 ? buildTreeProp(true, false) : buildMountainPeak(true);
         } else {
-          // coastal
           prop = side < 0 ? buildTreeProp(false, true) : buildMountainPeak(false);
         }
 
@@ -380,7 +506,19 @@ export function buildHighwayEnvironment(
     }
 
     root.add(segGroup);
-    segments.push({ group: segGroup, zStart: zPos });
+    segments.push({
+      group: segGroup,
+      zStart: zPos,
+      hasRamp,
+      rampType,
+      rampX,
+      rampZLocal,
+      rampTriggered: false,
+      hasHoop,
+      hoopX,
+      hoopZLocal,
+      hoopTriggered: false,
+    });
   }
 
   let weatherPoints: THREE.Points | null = null;

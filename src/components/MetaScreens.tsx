@@ -4,21 +4,27 @@ import {
   Award,
   Check,
   Coins,
+  ExternalLink,
   Flag,
+  Globe,
+  Info,
   Lock,
   Play,
   RotateCcw,
   Share2,
   ShieldCheck,
-  Siren,
   Target,
   Trophy,
+  User,
   Volume2,
   VolumeX,
 } from 'lucide-react';
+import devloperImg from '../assets/devloper.jpg';
+import githubImg from '../assets/github.png';
+import instaImg from '../assets/insta.jpg';
+import youtubeImg from '../assets/Youtube.png';
 import {
   ACHIEVEMENTS,
-  BOSSES,
   GAME_MODES,
   getCarById,
   getModeById,
@@ -30,7 +36,6 @@ import { getAchievementProgress } from '../game/storage';
 import {
   AchievementCategory,
   AchievementTier,
-  BossType,
   CameraPreset,
   ControlScheme,
   GameModeId,
@@ -58,31 +63,43 @@ export const WorldsScreen: React.FC<WorldsScreenProps> = ({
   onBack,
 }) => {
   return (
-    <div className="fixed inset-0 z-30 flex flex-col justify-between p-4 sm:p-6 pointer-events-none">
-      <div className="pointer-events-auto flex items-center justify-between gap-3 rounded-xl bg-[#090d16]/92 border border-white/10 px-4 py-3">
-        <div className="flex items-center gap-3">
+    <div
+      className="fixed inset-0 z-30 flex flex-col justify-between gap-3 p-3 sm:p-6 pointer-events-none"
+      style={{
+        paddingTop: 'max(0.75rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+        paddingLeft: 'max(0.75rem, env(safe-area-inset-left))',
+        paddingRight: 'max(0.75rem, env(safe-area-inset-right))',
+      }}
+    >
+      <div className="pointer-events-auto flex flex-wrap items-center justify-between gap-2.5 rounded-xl bg-[#090d16]/92 border border-white/10 px-3 sm:px-4 py-2.5">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <button
             type="button"
             onClick={onBack}
-            className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-sm font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer"
+            className="flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer shrink-0"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>Back</span>
           </button>
-          <div>
-            <h2 className="font-display text-lg font-bold text-white">Highway Environments</h2>
-            <p className="text-xs text-slate-400">Select an unlocked biome for live 3D preview</p>
+          <div className="min-w-0">
+            <h2 className="font-display text-base sm:text-lg font-bold text-white truncate">
+              Highway Environments
+            </h2>
+            <p className="text-[11px] sm:text-xs text-slate-400 truncate hidden sm:block">
+              Select an unlocked biome for live 3D preview
+            </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 rounded-lg bg-slate-900 border border-white/10 px-3 py-1.5 font-mono-num text-sm font-bold text-amber-300">
-            <Coins className="w-4 h-4 text-amber-400" />
+        <div className="flex items-center gap-2 sm:gap-3 ml-auto sm:ml-0">
+          <div className="flex items-center gap-1 rounded-lg bg-slate-900 border border-white/10 px-2.5 py-1.5 font-mono-num text-xs sm:text-sm font-bold text-amber-300">
+            <Coins className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
             <span>{progress.coins.toLocaleString()}</span>
           </div>
           <button
             type="button"
             onClick={onDriveNow}
-            className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-4 py-2 text-xs font-display font-bold text-slate-950 hover:bg-amber-400 cursor-pointer"
+            className="flex items-center gap-1 rounded-lg bg-amber-500 px-3 sm:px-4 py-1.5 sm:py-2 text-xs font-display font-bold text-slate-950 hover:bg-amber-400 cursor-pointer"
           >
             <Play className="w-3.5 h-3.5 fill-current" />
             <span>DRIVE</span>
@@ -90,8 +107,8 @@ export const WorldsScreen: React.FC<WorldsScreenProps> = ({
         </div>
       </div>
 
-      <div className="pointer-events-auto mx-auto w-full max-w-5xl rounded-xl bg-[#090d16]/94 border border-white/12 p-3.5 sm:p-4 max-h-[calc(100dvh-4.5rem)] overflow-y-auto custom-scroll">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+      <div className="pointer-events-auto mx-auto w-full max-w-5xl rounded-xl bg-[#090d16]/94 border border-white/12 p-3 sm:p-4 max-h-[56dvh] overflow-y-auto custom-scroll">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {WORLDS.map((w) => {
             const unlocked = progress.unlockedWorlds.includes(w.id);
             const selected = progress.selectedWorld === w.id;
@@ -170,31 +187,39 @@ export const ModesScreen: React.FC<ModesScreenProps> = ({
   onBack,
 }) => {
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center p-4 sm:p-6 bg-black/55">
-      <div className="w-full max-w-4xl rounded-xl bg-[#090d16]/96 border border-white/12 p-5 sm:p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto custom-scroll">
-        <div className="flex items-center justify-between gap-3 mb-5">
-          <div className="flex items-center gap-3">
+    <div
+      className="fixed inset-0 z-30 flex items-center justify-center p-3 sm:p-6 bg-black/55"
+      style={{
+        paddingTop: 'max(0.75rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+      }}
+    >
+      <div className="w-full max-w-4xl rounded-xl bg-[#090d16]/96 border border-white/12 p-4 sm:p-6 max-h-[90dvh] overflow-y-auto custom-scroll">
+        <div className="flex flex-wrap items-center justify-between gap-2.5 mb-4 sm:mb-5">
+          <div className="flex items-center gap-2.5 sm:gap-3">
             <button
               type="button"
               onClick={onBack}
-              className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-sm font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer"
+              className="flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer"
             >
               <ArrowLeft className="w-4 h-4" />
               <span>Back</span>
             </button>
-            <h2 className="font-display text-xl font-bold text-white">Select Game Mode</h2>
+            <h2 className="font-display text-lg sm:text-xl font-bold text-white">
+              Select Game Mode
+            </h2>
           </div>
           <button
             type="button"
             onClick={onDriveNow}
-            className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-5 py-2 text-xs font-display font-bold text-slate-950 hover:bg-amber-400 cursor-pointer"
+            className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-4 sm:px-5 py-2 text-xs font-display font-bold text-slate-950 hover:bg-amber-400 cursor-pointer"
           >
             <Play className="w-3.5 h-3.5 fill-current" />
             <span>START RUN</span>
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {GAME_MODES.map((m) => {
             const active = selectedMode === m.id;
             return (
@@ -202,14 +227,16 @@ export const ModesScreen: React.FC<ModesScreenProps> = ({
                 key={m.id}
                 type="button"
                 onClick={() => onSelectMode(m.id)}
-                className={`text-left rounded-xl border p-4 transition-colors cursor-pointer ${
+                className={`text-left rounded-xl border p-3.5 sm:p-4 transition-colors cursor-pointer ${
                   active
                     ? 'bg-slate-800/90 border-amber-400'
                     : 'bg-slate-900/80 border-white/10 hover:border-white/25'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2 mb-1">
-                  <span className="font-display text-base font-bold text-white">{m.name}</span>
+                  <span className="font-display text-sm sm:text-base font-bold text-white">
+                    {m.name}
+                  </span>
                   <Flag className={`w-4 h-4 ${active ? 'text-amber-400' : 'text-slate-500'}`} />
                 </div>
                 <div className="text-xs font-semibold text-cyan-300 mb-2">{m.subtitle}</div>
@@ -226,104 +253,22 @@ export const ModesScreen: React.FC<ModesScreenProps> = ({
   );
 };
 
-/* ---------------- BOSS EVENTS SCREEN ---------------- */
-interface EventsScreenProps {
-  selectedBoss: BossType;
-  totalEscapes: number;
-  onSelectBoss: (boss: BossType) => void;
-  onLaunchBossChase: () => void;
-  onBack: () => void;
-}
-
-export const EventsScreen: React.FC<EventsScreenProps> = ({
-  selectedBoss,
-  totalEscapes,
-  onSelectBoss,
-  onLaunchBossChase,
-  onBack,
-}) => {
-  return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center p-4 sm:p-6 bg-black/60">
-      <div className="w-full max-w-4xl rounded-xl bg-[#090d16]/96 border border-white/12 p-5 sm:p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto custom-scroll">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-sm font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span>Back</span>
-            </button>
-            <div>
-              <h2 className="font-display text-xl font-bold text-white">Boss Chase Events</h2>
-              <p className="text-xs text-slate-400">
-                Survive a 60-second pursuit against highway interceptors · {totalEscapes} Escaped
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={onLaunchBossChase}
-            className="flex items-center gap-2 rounded-lg bg-rose-500 px-5 py-2.5 text-xs font-display font-bold text-white hover:bg-rose-400 cursor-pointer"
-          >
-            <Siren className="w-4 h-4" />
-            <span>LAUNCH BOSS ESCAPE</span>
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-          {BOSSES.map((b) => {
-            const active = selectedBoss === b.id;
-            return (
-              <button
-                key={b.id}
-                type="button"
-                onClick={() => onSelectBoss(b.id)}
-                className={`text-left rounded-xl border p-4 transition-colors cursor-pointer ${
-                  active
-                    ? 'bg-slate-800/90 border-rose-400'
-                    : 'bg-slate-900/80 border-white/10 hover:border-white/25'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <span className="font-display text-lg font-bold text-white">{b.name}</span>
-                  <span
-                    className="h-3.5 w-3.5 rounded-full border border-white/30"
-                    style={{ backgroundColor: b.accent }}
-                  />
-                </div>
-                <div className="text-xs font-semibold text-rose-300 mb-2">{b.subtitle}</div>
-                <p className="text-xs text-slate-300 mb-3">
-                  Swerves across lanes to intercept your wrong-way run. Dodge traffic, burn nitro, and hold out for 60 seconds.
-                </p>
-                <div className="font-mono-num text-xs font-bold text-amber-300">
-                  Bounty: +{b.rewardCoins.toLocaleString()} Coins · +450 XP
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-};
-
 /* ---------------- LEADERBOARD & RECORDS SCREEN ---------------- */
 interface LeaderboardScreenProps {
   progress: PlayerProgress;
   onBack: () => void;
+  onNavigateToAbout?: () => void;
 }
 
 export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
   progress,
   onBack,
+  onNavigateToAbout,
 }) => {
   const [sharedMsg, setSharedMsg] = useState<string | null>(null);
 
   const handleShare = async () => {
-    const text = `HIGHWAY HAVOC: WRONG WAY — Personal Best: ${progress.bestDistance.toLocaleString()}m | High Score: ${progress.highScore.toLocaleString()} | Max Combo: x${progress.bestCombo}`;
+    const text = `HIGHWAY HAVOC: WRONG WAY — Best Distance: ${progress.bestDistance.toLocaleString()}m | High Score: ${progress.highScore.toLocaleString()} | Near Misses: ${progress.totalNearMisses} | Stunts: ${progress.totalStuntJumps} | Max Combo: x${progress.bestCombo}`;
     try {
       if (navigator.share) {
         await navigator.share({ title: 'HIGHWAY HAVOC: WRONG WAY', text });
@@ -339,58 +284,79 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center p-4 sm:p-6 bg-black/60">
-      <div className="w-full max-w-4xl rounded-xl bg-[#090d16]/96 border border-white/12 p-5 sm:p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto custom-scroll">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-          <div className="flex items-center gap-3">
+    <div
+      className="fixed inset-0 z-30 flex items-center justify-center p-3 sm:p-6 bg-black/60"
+      style={{
+        paddingTop: 'max(0.75rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+      }}
+    >
+      <div className="w-full max-w-4xl rounded-xl bg-[#090d16]/96 border border-white/12 p-4 sm:p-6 max-h-[90dvh] overflow-y-auto custom-scroll">
+        <div className="flex flex-wrap items-center justify-between gap-2.5 mb-4 sm:mb-5">
+          <div className="flex items-center gap-2.5 sm:gap-3">
             <button
               type="button"
               onClick={onBack}
-              className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-sm font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer"
+              className="flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer shrink-0"
             >
               <ArrowLeft className="w-4 h-4" />
               <span>Back</span>
             </button>
             <div>
-              <h2 className="font-display text-xl font-bold text-white">Records &amp; Leaderboard</h2>
-              <p className="text-xs text-slate-400">
-                Local career records saved on this device (Global online board requires cloud backend)
+              <h2 className="font-display text-lg sm:text-xl font-bold text-white">
+                Records &amp; Leaderboard
+              </h2>
+              <p className="text-[11px] sm:text-xs text-slate-400">
+                Career stats · Near Misses: {progress.totalNearMisses} · Stunt Jumps:{' '}
+                {progress.totalStuntJumps}
               </p>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleShare}
-            className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-4 py-2 text-xs font-display font-bold text-slate-950 hover:bg-amber-400 cursor-pointer"
-          >
-            <Share2 className="w-3.5 h-3.5" />
-            <span>{sharedMsg ?? 'SHARE RECORD'}</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {onNavigateToAbout && (
+              <button
+                type="button"
+                onClick={onNavigateToAbout}
+                className="flex items-center gap-1.5 rounded-lg bg-cyan-500/20 border border-cyan-400/50 px-3 py-2 text-xs font-display font-bold text-cyan-300 hover:bg-cyan-500/30 cursor-pointer"
+              >
+                <Info className="w-3.5 h-3.5 text-cyan-400" />
+                <span>ABOUT DEV</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleShare}
+              className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-3.5 py-2 text-xs font-display font-bold text-slate-950 hover:bg-amber-400 cursor-pointer"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span>{sharedMsg ?? 'SHARE RECORD'}</span>
+            </button>
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-          <div className="rounded-lg bg-slate-900 border border-white/10 p-3.5">
-            <div className="text-xs text-slate-400">Best Distance</div>
-            <div className="font-display text-2xl font-bold text-amber-300 tabular-nums">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 mb-4 sm:mb-5">
+          <div className="rounded-lg bg-slate-900 border border-white/10 p-3">
+            <div className="text-[11px] sm:text-xs text-slate-400">Best Distance</div>
+            <div className="font-display text-xl sm:text-2xl font-bold text-amber-300 tabular-nums">
               {progress.bestDistance.toLocaleString()}m
             </div>
           </div>
-          <div className="rounded-lg bg-slate-900 border border-white/10 p-3.5">
-            <div className="text-xs text-slate-400">Best Score</div>
-            <div className="font-display text-2xl font-bold text-white tabular-nums">
+          <div className="rounded-lg bg-slate-900 border border-white/10 p-3">
+            <div className="text-[11px] sm:text-xs text-slate-400">Best Score</div>
+            <div className="font-display text-xl sm:text-2xl font-bold text-white tabular-nums">
               {progress.highScore.toLocaleString()}
             </div>
           </div>
-          <div className="rounded-lg bg-slate-900 border border-white/10 p-3.5">
-            <div className="text-xs text-slate-400">Best Near-Miss Combo</div>
-            <div className="font-display text-2xl font-bold text-cyan-300 tabular-nums">
+          <div className="rounded-lg bg-slate-900 border border-white/10 p-3">
+            <div className="text-[11px] sm:text-xs text-slate-400">Best Stunt Combo</div>
+            <div className="font-display text-xl sm:text-2xl font-bold text-cyan-300 tabular-nums">
               x{progress.bestCombo}
             </div>
           </div>
-          <div className="rounded-lg bg-slate-900 border border-white/10 p-3.5">
-            <div className="text-xs text-slate-400">Most Coins (1 Run)</div>
-            <div className="font-display text-2xl font-bold text-emerald-300 tabular-nums">
+          <div className="rounded-lg bg-slate-900 border border-white/10 p-3">
+            <div className="text-[11px] sm:text-xs text-slate-400">Most Coins (1 Run)</div>
+            <div className="font-display text-xl sm:text-2xl font-bold text-emerald-300 tabular-nums">
               {progress.mostCoinsRun.toLocaleString()}
             </div>
           </div>
@@ -417,20 +383,20 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
                 return (
                   <div
                     key={r.id}
-                    className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-sm"
+                    className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm"
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       <span className="font-mono-num text-xs font-bold text-amber-400 w-6">
                         #{idx + 1}
                       </span>
-                      <div>
-                        <div className="font-semibold text-white">{car.name}</div>
-                        <div className="text-xs text-slate-400">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-white truncate">{car.name}</div>
+                        <div className="text-xs text-slate-400 truncate">
                           {world.name} · Max x{r.maxCombo} Combo
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-5 font-mono-num text-xs">
+                    <div className="flex items-center gap-4 font-mono-num text-xs">
                       <span className="text-white font-bold">{r.distance.toLocaleString()}m</span>
                       <span className="text-cyan-300">{r.score.toLocaleString()} pts</span>
                       <span className="text-amber-300">+{r.coins.toLocaleString()}</span>
@@ -472,24 +438,31 @@ export const MissionsScreen: React.FC<MissionsScreenProps> = ({
   const resetCountdown = getNextDailyResetLabel();
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center p-4 sm:p-6 bg-black/55">
-      <div className="w-full max-w-4xl rounded-xl bg-[#090d16]/96 border border-white/12 p-5 sm:p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto custom-scroll">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-          <div className="flex items-center gap-3">
+    <div
+      className="fixed inset-0 z-30 flex items-center justify-center p-3 sm:p-6 bg-black/55"
+      style={{
+        paddingTop: 'max(0.75rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+      }}
+    >
+      <div className="w-full max-w-4xl rounded-xl bg-[#090d16]/96 border border-white/12 p-4 sm:p-6 max-h-[90dvh] overflow-y-auto custom-scroll">
+        <div className="flex flex-wrap items-center justify-between gap-2.5 mb-4 sm:mb-5">
+          <div className="flex items-center gap-2.5 sm:gap-3">
             <button
               type="button"
               onClick={onBack}
-              className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-sm font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer"
+              className="flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer shrink-0"
             >
               <ArrowLeft className="w-4 h-4" />
               <span>Back</span>
             </button>
             <div>
-              <h2 className="font-display text-xl font-bold text-white">
+              <h2 className="font-display text-lg sm:text-xl font-bold text-white">
                 Daily &amp; Unlimited Missions
               </h2>
-              <p className="text-xs text-slate-400">
-                Daily Date: {progress.dailyDateKey} (Next Day Reset in {resetCountdown}) · Completed: {progress.totalMissionsCompleted} · Car Parts: {progress.carParts}
+              <p className="text-[11px] sm:text-xs text-slate-400">
+                Daily Date: {progress.dailyDateKey} (Reset in {resetCountdown}) · Completed:{' '}
+                {progress.totalMissionsCompleted} · Car Parts: {progress.carParts}
               </p>
             </div>
           </div>
@@ -501,8 +474,8 @@ export const MissionsScreen: React.FC<MissionsScreenProps> = ({
 
         {/* Unlimited Never-Stop Endless Contracts */}
         <div className="mb-6">
-          <div className="flex items-center justify-between mb-2.5">
-            <h3 className="font-display text-sm font-bold uppercase tracking-wider text-cyan-300">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+            <h3 className="font-display text-xs sm:text-sm font-bold uppercase tracking-wider text-cyan-300">
               Unlimited Endless Contracts · Never Stop Progression
             </h3>
             <span className="text-[11px] font-mono-num text-slate-400">
@@ -517,12 +490,14 @@ export const MissionsScreen: React.FC<MissionsScreenProps> = ({
               return (
                 <div
                   key={m.id}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl bg-slate-900/95 border border-cyan-500/25 p-4"
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 rounded-xl bg-slate-900/95 border border-cyan-500/25 p-3.5 sm:p-4"
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <Target className="w-4 h-4 text-cyan-400 shrink-0" />
-                      <span className="font-display font-bold text-base text-white">{m.title}</span>
+                      <span className="font-display font-bold text-sm sm:text-base text-white">
+                        {m.title}
+                      </span>
                     </div>
                     <p className="text-xs text-slate-300 mt-1">{m.description}</p>
                     <div className="mt-2.5 flex items-center gap-3">
@@ -560,8 +535,8 @@ export const MissionsScreen: React.FC<MissionsScreenProps> = ({
 
         {/* Daily Missions (Auto-refresh every new calendar day) */}
         <div>
-          <div className="flex items-center justify-between mb-2.5">
-            <h3 className="font-display text-sm font-bold uppercase tracking-wider text-amber-300">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+            <h3 className="font-display text-xs sm:text-sm font-bold uppercase tracking-wider text-amber-300">
               Daily Missions · Refreshes Every New Day
             </h3>
             <span className="text-[11px] font-mono-num text-slate-400">
@@ -576,12 +551,14 @@ export const MissionsScreen: React.FC<MissionsScreenProps> = ({
               return (
                 <div
                   key={m.id}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl bg-slate-900/90 border border-white/10 p-4"
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 rounded-xl bg-slate-900/90 border border-white/10 p-3.5 sm:p-4"
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <Target className="w-4 h-4 text-rose-400 shrink-0" />
-                      <span className="font-display font-bold text-base text-white">{m.title}</span>
+                      <span className="font-display font-bold text-sm sm:text-base text-white">
+                        {m.title}
+                      </span>
                     </div>
                     <p className="text-xs text-slate-300 mt-1">{m.description}</p>
                     <div className="mt-2.5 flex items-center gap-3">
@@ -647,7 +624,8 @@ const ACH_CATEGORIES: ('All' | AchievementCategory)[] = [
   'All',
   'Survival',
   'Speed',
-  'Combat',
+  'Traffic',
+  'Stunts',
   'Garage',
   'Mastery',
 ];
@@ -664,21 +642,29 @@ export const AchievementsScreen: React.FC<AchievementsScreenProps> = ({
       : ACHIEVEMENTS.filter((a) => a.category === catFilter);
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center p-4 sm:p-6 bg-black/55">
-      <div className="w-full max-w-4xl rounded-xl bg-[#090d16]/96 border border-white/12 p-5 sm:p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto custom-scroll">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-          <div className="flex items-center gap-3">
+    <div
+      className="fixed inset-0 z-30 flex items-center justify-center p-3 sm:p-6 bg-black/55"
+      style={{
+        paddingTop: 'max(0.75rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+      }}
+    >
+      <div className="w-full max-w-4xl rounded-xl bg-[#090d16]/96 border border-white/12 p-4 sm:p-6 max-h-[90dvh] overflow-y-auto custom-scroll">
+        <div className="flex flex-wrap items-center justify-between gap-2.5 mb-4">
+          <div className="flex items-center gap-2.5 sm:gap-3">
             <button
               type="button"
               onClick={onBack}
-              className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-sm font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer"
+              className="flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer shrink-0"
             >
               <ArrowLeft className="w-4 h-4" />
               <span>Back</span>
             </button>
             <div>
-              <h2 className="font-display text-xl font-bold text-white">Advanced Achievements</h2>
-              <p className="text-xs text-slate-400">
+              <h2 className="font-display text-lg sm:text-xl font-bold text-white">
+                Advanced Achievements
+              </h2>
+              <p className="text-[11px] sm:text-xs text-slate-400">
                 {progress.claimedAchievements.length} / {ACHIEVEMENTS.length} Claimed across 5 Ranks
               </p>
             </div>
@@ -793,23 +779,29 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const [confirmReset, setConfirmReset] = useState(false);
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center p-4 sm:p-6 bg-black/65">
-      <div className="w-full max-w-xl rounded-xl bg-[#090d16]/96 border border-white/12 p-5 sm:p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto custom-scroll">
-        <div className="flex items-center gap-3 mb-5">
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-6 bg-black/65"
+      style={{
+        paddingTop: 'max(0.75rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+      }}
+    >
+      <div className="w-full max-w-xl rounded-xl bg-[#090d16]/96 border border-white/12 p-4 sm:p-6 max-h-[90dvh] overflow-y-auto custom-scroll">
+        <div className="flex items-center gap-3 mb-4 sm:mb-5">
           <button
             type="button"
             onClick={onBack}
-            className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-sm font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer"
+            className="flex items-center gap-1 rounded-lg bg-slate-800 px-3 py-1.5 text-xs sm:text-sm font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>Back</span>
           </button>
-          <h2 className="font-display text-xl font-bold text-white">Game Settings</h2>
+          <h2 className="font-display text-lg sm:text-xl font-bold text-white">Game Settings</h2>
         </div>
 
         <div className="space-y-4">
           <div className="rounded-lg bg-slate-900/80 border border-white/10 p-4 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-sm font-semibold text-white">Audio &amp; Vibration</span>
               <div className="flex items-center gap-2">
                 <button
@@ -892,7 +884,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           </div>
 
           <div className="rounded-lg bg-slate-900/80 border border-white/10 p-4 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-white">Tilt Steering (Accelerometer)</div>
                 <div className="text-xs text-slate-400">Steer by tilting Android phone left/right</div>
@@ -900,7 +892,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               <button
                 type="button"
                 onClick={() => onChange({ tiltSteering: !settings.tiltSteering })}
-                className={`rounded-md px-3 py-1.5 text-xs font-bold cursor-pointer ${
+                className={`rounded-md px-3 py-1.5 text-xs font-bold cursor-pointer shrink-0 ${
                   settings.tiltSteering
                     ? 'bg-amber-500 text-slate-950'
                     : 'bg-slate-800 text-slate-300'
@@ -981,7 +973,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             <button
               type="button"
               onClick={onReplayTutorial}
-              className="rounded-md bg-slate-800 border border-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 cursor-pointer"
+              className="rounded-md bg-slate-800 border border-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 cursor-pointer shrink-0"
             >
               Reset Tutorial
             </button>
@@ -996,7 +988,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               <button
                 type="button"
                 onClick={() => setConfirmReset(true)}
-                className="rounded-md bg-rose-500/20 border border-rose-500/40 px-3 py-1.5 text-xs font-bold text-rose-300 hover:bg-rose-500/30 cursor-pointer"
+                className="rounded-md bg-rose-500/20 border border-rose-500/40 px-3 py-1.5 text-xs font-bold text-rose-300 hover:bg-rose-500/30 cursor-pointer shrink-0"
               >
                 Reset
               </button>
@@ -1031,6 +1023,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 /* ---------------- PAUSE MODAL ---------------- */
 interface PauseModalProps {
   onResume: () => void;
+  onFinishRun: () => void;
   onRestart: () => void;
   onSettings: () => void;
   onGarage: () => void;
@@ -1039,6 +1032,7 @@ interface PauseModalProps {
 
 export const PauseModal: React.FC<PauseModalProps> = ({
   onResume,
+  onFinishRun,
   onRestart,
   onSettings,
   onGarage,
@@ -1046,9 +1040,11 @@ export const PauseModal: React.FC<PauseModalProps> = ({
 }) => {
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center p-4 bg-black/65">
-      <div className="w-full max-w-sm rounded-xl bg-[#090d16]/96 border border-white/15 p-6 text-center">
+      <div className="w-full max-w-sm rounded-xl bg-[#090d16]/96 border border-white/15 p-5 sm:p-6 text-center max-h-[92dvh] overflow-y-auto custom-scroll">
         <h2 className="font-display text-2xl font-bold text-white mb-1">RUN PAUSED</h2>
-        <p className="text-xs text-slate-400 mb-6">Wrong-way traffic frozen</p>
+        <p className="text-xs text-slate-400 mb-5">
+          Oncoming traffic paused · Bank coins &amp; distance anytime
+        </p>
 
         <div className="flex flex-col gap-2.5">
           <button
@@ -1057,6 +1053,13 @@ export const PauseModal: React.FC<PauseModalProps> = ({
             className="w-full rounded-lg bg-amber-500 py-3 font-display font-bold text-slate-950 hover:bg-amber-400 cursor-pointer"
           >
             RESUME
+          </button>
+          <button
+            type="button"
+            onClick={onFinishRun}
+            className="w-full rounded-lg bg-emerald-500/20 border border-emerald-400/45 py-2.5 text-sm font-display font-bold text-emerald-300 hover:bg-emerald-500/30 cursor-pointer"
+          >
+            Finish &amp; Bank Run
           </button>
           <button
             type="button"
@@ -1131,59 +1134,67 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   const reviveAffordable = progress.reviveTokens > 0 || progress.coins >= 250;
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center p-4 bg-black/72">
-      <div className="w-full max-w-lg rounded-xl bg-[#090d16]/96 border border-white/15 p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto custom-scroll">
+    <div
+      className="fixed inset-0 z-30 flex items-center justify-center p-3 sm:p-4 bg-black/72"
+      style={{
+        paddingTop: 'max(0.75rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+      }}
+    >
+      <div className="w-full max-w-lg rounded-xl bg-[#090d16]/96 border border-white/15 p-4 sm:p-6 max-h-[90dvh] overflow-y-auto custom-scroll">
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-rose-400">
-              Wrecked on {world.name}
+            <div className="text-xs font-semibold uppercase tracking-wider text-amber-400">
+              {world.name} · {summary.modeCompleted ? 'Mode Complete' : 'Run Summary'}
             </div>
-            <h2 className="font-display text-3xl font-bold text-white">RUN COMPLETE</h2>
+            <h2 className="font-display text-2xl sm:text-3xl font-bold text-white">
+              {summary.crashesTaken > 0 && summary.xpEarned >= 0 ? 'RUN OVER' : 'RUN COMPLETE'}
+            </h2>
             <div className="text-xs text-slate-400 mt-0.5">
               {car.name} · {mode.name}
             </div>
           </div>
           {summary.isNewBestDistance && (
-            <div className="rounded bg-amber-500 px-3 py-1 font-display text-xs font-bold text-slate-950">
-              NEW BEST DISTANCE
+            <div className="rounded bg-amber-500 px-2.5 py-1 font-display text-[11px] font-bold text-slate-950 shrink-0">
+              NEW BEST
             </div>
           )}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
-          <div className="rounded-lg bg-slate-900 border border-white/10 p-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3 mb-4">
+          <div className="rounded-lg bg-slate-900 border border-white/10 p-2.5 sm:p-3">
             <div className="text-[11px] text-slate-400">Final Distance</div>
-            <div className="font-display text-xl font-bold text-white tabular-nums">
+            <div className="font-display text-lg sm:text-xl font-bold text-white tabular-nums">
               {summary.distance.toLocaleString()}m
             </div>
           </div>
-          <div className="rounded-lg bg-slate-900 border border-white/10 p-3">
+          <div className="rounded-lg bg-slate-900 border border-white/10 p-2.5 sm:p-3">
             <div className="text-[11px] text-slate-400">Best Distance</div>
-            <div className="font-display text-xl font-bold text-amber-300 tabular-nums">
+            <div className="font-display text-lg sm:text-xl font-bold text-amber-300 tabular-nums">
               {progress.bestDistance.toLocaleString()}m
             </div>
           </div>
-          <div className="rounded-lg bg-slate-900 border border-white/10 p-3">
+          <div className="rounded-lg bg-slate-900 border border-white/10 p-2.5 sm:p-3">
             <div className="text-[11px] text-slate-400">Coins Earned</div>
-            <div className="font-display text-xl font-bold text-amber-400 tabular-nums">
+            <div className="font-display text-lg sm:text-xl font-bold text-amber-400 tabular-nums">
               +{totalRunCoins.toLocaleString()}
             </div>
           </div>
-          <div className="rounded-lg bg-slate-900 border border-white/10 p-3">
-            <div className="text-[11px] text-slate-400">Near Misses</div>
-            <div className="font-display text-xl font-bold text-cyan-300 tabular-nums">
-              {summary.nearMisses} (Max x{summary.maxCombo})
+          <div className="rounded-lg bg-slate-900 border border-white/10 p-2.5 sm:p-3">
+            <div className="text-[11px] text-slate-400">Near Misses / Stunts</div>
+            <div className="font-display text-lg sm:text-xl font-bold text-cyan-300 tabular-nums">
+              {summary.nearMisses} · {summary.stuntJumps} (x{summary.maxCombo})
             </div>
           </div>
-          <div className="rounded-lg bg-slate-900 border border-white/10 p-3">
+          <div className="rounded-lg bg-slate-900 border border-white/10 p-2.5 sm:p-3">
             <div className="text-[11px] text-slate-400">Peak Speed</div>
-            <div className="font-display text-xl font-bold text-white tabular-nums">
+            <div className="font-display text-lg sm:text-xl font-bold text-white tabular-nums">
               {summary.maxSpeedKmh} km/h
             </div>
           </div>
-          <div className="rounded-lg bg-slate-900 border border-white/10 p-3">
+          <div className="rounded-lg bg-slate-900 border border-white/10 p-2.5 sm:p-3">
             <div className="text-[11px] text-slate-400">XP Gained</div>
-            <div className="font-display text-xl font-bold text-emerald-400 tabular-nums">
+            <div className="font-display text-lg sm:text-xl font-bold text-emerald-400 tabular-nums">
               +{summary.xpEarned}
             </div>
           </div>
@@ -1201,7 +1212,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
           </div>
         </div>
 
-        {/* Rewarded 2x Coin Bonus (AdMob on Android APK, single-claim bonus on web preview) */}
+        {/* Rewarded 2x Coin Bonus via Ad */}
         {totalRunCoins > 0 && !bonusClaimed && (
           <button
             type="button"
@@ -1215,7 +1226,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
                 ? 'LOADING AD...'
                 : nativeAdsReady
                   ? `WATCH AD · 2X COINS (+${totalRunCoins.toLocaleString()})`
-                  : `OPTIONAL BONUS · CLAIM +${totalRunCoins.toLocaleString()} EXTRA COINS`}
+                  : `WATCH AD · 2X COINS (+${totalRunCoins.toLocaleString()})`}
             </span>
           </button>
         )}
@@ -1235,7 +1246,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
               type="button"
               disabled={!reviveAffordable || adLoading}
               onClick={onRevive}
-              className={`w-full flex items-center justify-center gap-2 rounded-lg py-3 font-display font-bold text-sm transition-colors ${
+              className={`w-full flex items-center justify-center gap-2 rounded-lg py-2.5 font-display font-bold text-sm transition-colors ${
                 reviveAffordable
                   ? 'bg-cyan-400 text-slate-950 hover:bg-cyan-300 cursor-pointer'
                   : 'bg-slate-800 text-slate-500 cursor-not-allowed'
@@ -1256,7 +1267,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             type="button"
             disabled={adLoading}
             onClick={onRetry}
-            className="flex items-center justify-center gap-1.5 rounded-lg bg-amber-500 py-3 font-display font-bold text-sm text-slate-950 hover:bg-amber-400 cursor-pointer"
+            className="flex items-center justify-center gap-1.5 rounded-lg bg-amber-500 py-2.5 sm:py-3 font-display font-bold text-xs sm:text-sm text-slate-950 hover:bg-amber-400 cursor-pointer"
           >
             <RotateCcw className="w-4 h-4" />
             <span>RETRY</span>
@@ -1265,7 +1276,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             type="button"
             disabled={adLoading}
             onClick={onGarage}
-            className="rounded-lg bg-slate-800 border border-white/10 py-3 text-sm font-semibold text-white hover:bg-slate-700 cursor-pointer"
+            className="rounded-lg bg-slate-800 border border-white/10 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold text-white hover:bg-slate-700 cursor-pointer"
           >
             Garage
           </button>
@@ -1273,10 +1284,228 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             type="button"
             disabled={adLoading}
             onClick={onHome}
-            className="rounded-lg bg-slate-800 border border-white/10 py-3 text-sm font-semibold text-white hover:bg-slate-700 cursor-pointer"
+            className="rounded-lg bg-slate-800 border border-white/10 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold text-white hover:bg-slate-700 cursor-pointer"
           >
             Menu
           </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ---------------- ABOUT GAME & DEVELOPER SCREEN ---------------- */
+interface AboutScreenProps {
+  onBack: () => void;
+}
+
+export const AboutScreen: React.FC<AboutScreenProps> = ({ onBack }) => {
+  const handleOpenExternalUrl = (e: React.MouseEvent, url: string) => {
+    e.preventDefault();
+    try {
+      window.open(url, '_system') || window.open(url, '_blank');
+    } catch {
+      window.open(url, '_blank');
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-30 flex flex-col bg-[#070a12] text-slate-100 overflow-hidden"
+      style={{
+        paddingTop: 'max(0.5rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))',
+        paddingLeft: 'max(0.5rem, env(safe-area-inset-left))',
+        paddingRight: 'max(0.5rem, env(safe-area-inset-right))',
+      }}
+    >
+      {/* Top Header Bar */}
+      <div className="shrink-0 z-20 flex items-center justify-between gap-3 px-3.5 sm:px-5 py-2.5 sm:py-3 bg-[#090d16]/98 border-b border-white/12 shadow-lg">
+        <div className="flex items-center gap-2.5 sm:gap-3">
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-semibold text-slate-200 hover:bg-slate-700 transition-colors cursor-pointer shrink-0"
+          >
+            <ArrowLeft className="w-4 h-4 text-slate-300" />
+            <span>Back</span>
+          </button>
+          <div>
+            <h2 className="font-display text-sm sm:text-lg font-bold text-white flex items-center gap-1.5 sm:gap-2">
+              <span>About Game &amp; Developer</span>
+            </h2>
+          </div>
+        </div>
+
+        <span className="hidden sm:inline-block rounded-md bg-slate-900 border border-white/10 px-2.5 py-1 text-[10px] sm:text-xs font-mono font-bold text-cyan-300">
+          HIGHWAY HAVOC WRONG WAY
+        </span>
+      </div>
+
+      {/* Main Content Area - Full Android Scroll View */}
+      <div className="flex-1 overflow-y-auto custom-scroll px-3 sm:px-6 py-3 sm:py-4 max-w-4xl mx-auto w-full flex flex-col gap-3.5 sm:gap-5 pb-10">
+        {/* Developer Info Card */}
+        <div className="rounded-2xl bg-gradient-to-r from-slate-900/95 via-[#0c1322]/95 to-slate-900/95 border border-amber-500/35 p-3.5 sm:p-5 shadow-xl relative">
+          <div className="flex flex-row items-center sm:items-start gap-3.5 sm:gap-5">
+            <div className="relative shrink-0">
+              <div className="w-20 h-20 sm:w-28 sm:h-28 rounded-xl sm:rounded-2xl p-0.5 sm:p-1 bg-gradient-to-b from-amber-400 via-amber-500/40 to-slate-900 border border-amber-400/80 shadow-xl shadow-amber-500/25 overflow-hidden flex items-center justify-center">
+                <img
+                  src={devloperImg}
+                  alt="Krishna Patil Rajput"
+                  onError={(e) => {
+                    const img = e.target as HTMLImageElement;
+                    if (!img.dataset.tried1) {
+                      img.dataset.tried1 = 'true';
+                      img.src = 'assets/devloper.jpg';
+                    } else if (!img.dataset.tried2) {
+                      img.dataset.tried2 = 'true';
+                      img.src = './assets/devloper.jpg';
+                    }
+                  }}
+                  className="w-full h-full rounded-lg sm:rounded-xl object-cover object-top sm:object-center shadow-inner"
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 min-w-0 text-left">
+              <div className="inline-block rounded-md bg-amber-500/15 border border-amber-400/40 px-2 py-0.5 text-[9px] sm:text-xs font-bold text-amber-300 uppercase tracking-wider mb-1">
+                Lead Creator &amp; Developer
+              </div>
+              <h3 className="font-display text-base sm:text-2xl font-bold text-white tracking-wide truncate">
+                Krishna Patil Rajput
+              </h3>
+              <p className="text-[11px] sm:text-sm text-slate-300 font-medium mt-0.5">
+                Real Name: <span className="text-amber-300 font-semibold">Krishna Ajaysing Patil</span>
+              </p>
+              <p className="text-[11px] sm:text-xs text-slate-300 mt-1.5 leading-snug sm:leading-relaxed line-clamp-3 sm:line-clamp-none">
+                Architect and creator of HIGHWAY HAVOC: WRONG WAY. Specializing in high-performance 3D WebGL/Three.js rendering, mobile Android haptics, kinetic audio engines, and high-speed wrong-way vehicle physics.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* About Game Card */}
+        <div className="rounded-2xl bg-[#090d16]/95 border border-white/12 p-4 sm:p-6 shadow-lg">
+          <h4 className="font-display text-base sm:text-xl font-bold text-white mb-2.5 flex items-center gap-2">
+            <Flag className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />
+            <span>About The Game</span>
+          </h4>
+          <p className="text-xs sm:text-sm text-slate-300 leading-relaxed mb-4">
+            HIGHWAY HAVOC: WRONG WAY is an adrenaline-fueled 3D six-lane wrong-way highway racing game where speed and precision steering determine survival. Drive against relentless oncoming traffic waves, jump off stunt ramps, execute high-speed near misses, and activate kinetic super-car abilities.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs sm:text-sm text-slate-300">
+            <div className="rounded-xl bg-slate-950/70 border border-white/8 p-3 flex flex-col gap-0.5">
+              <span className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Game Name</span>
+              <span className="text-cyan-300 font-bold text-xs sm:text-sm truncate">HIGHWAY HAVOC WRONG WAY</span>
+            </div>
+            <div className="rounded-xl bg-slate-950/70 border border-white/8 p-3 flex flex-col gap-0.5">
+              <span className="text-[11px] uppercase tracking-wider font-bold text-slate-400">App Version</span>
+              <span className="text-amber-300 font-semibold">App Version 1.2 (Code 3)</span>
+            </div>
+            <div className="rounded-xl bg-slate-950/70 border border-white/8 p-3 flex flex-col gap-0.5">
+              <span className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Graphics Engine</span>
+              <span className="text-white font-medium">Three.js WebGL &amp; Capacitor Android</span>
+            </div>
+            <div className="rounded-xl bg-slate-950/70 border border-white/8 p-3 flex flex-col gap-0.5">
+              <span className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Control Schemes</span>
+              <span className="text-white font-medium">Touch Swipe, On-Screen Buttons &amp; Gyro Tilt</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Social Links Section */}
+        <div className="rounded-2xl bg-[#090d16]/95 border border-white/12 p-4 sm:p-6 shadow-lg">
+          <h4 className="font-display text-base sm:text-xl font-bold text-white mb-3 sm:mb-4 flex items-center gap-2">
+            <Globe className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
+            <span>Connect &amp; Follow Developer</span>
+          </h4>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+            {/* Instagram */}
+            <a
+              href="https://www.instagram.com/krish_root_labs?"
+              onClick={(e) => handleOpenExternalUrl(e, 'https://www.instagram.com/krish_root_labs?')}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex items-center gap-3.5 rounded-xl bg-slate-900/90 border border-white/12 p-3.5 hover:border-pink-500/70 hover:bg-slate-800/90 transition-all duration-200 cursor-pointer shadow-md"
+            >
+              <img
+                src={instaImg}
+                alt="Instagram Logo"
+                onError={(e) => {
+                  const img = e.target as HTMLImageElement;
+                  img.src = 'assets/insta.jpg';
+                }}
+                className="w-11 h-11 rounded-xl object-cover border border-pink-500/40 group-hover:scale-105 transition-transform shrink-0"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-xs sm:text-sm font-bold text-white group-hover:text-pink-300 transition-colors">
+                  Instagram
+                </div>
+                <div className="text-[11px] text-slate-400 truncate">
+                  @krish_root_labs
+                </div>
+              </div>
+              <ExternalLink className="w-4 h-4 text-slate-400 group-hover:text-pink-400 shrink-0" />
+            </a>
+
+            {/* GitHub */}
+            <a
+              href="https://github.com/krishna67890"
+              onClick={(e) => handleOpenExternalUrl(e, 'https://github.com/krishna67890')}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex items-center gap-3.5 rounded-xl bg-slate-900/90 border border-white/12 p-3.5 hover:border-slate-300/70 hover:bg-slate-800/90 transition-all duration-200 cursor-pointer shadow-md"
+            >
+              <img
+                src={githubImg}
+                alt="GitHub Logo"
+                onError={(e) => {
+                  const img = e.target as HTMLImageElement;
+                  img.src = 'assets/github.png';
+                }}
+                className="w-11 h-11 rounded-xl object-cover border border-white/20 group-hover:scale-105 transition-transform bg-white/10 shrink-0"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-xs sm:text-sm font-bold text-white group-hover:text-slate-200 transition-colors">
+                  GitHub
+                </div>
+                <div className="text-[11px] text-slate-400 truncate">
+                  krishna67890
+                </div>
+              </div>
+              <ExternalLink className="w-4 h-4 text-slate-400 group-hover:text-slate-200 shrink-0" />
+            </a>
+
+            {/* YouTube */}
+            <a
+              href="https://www.youtube.com/@CodewithKrishYT"
+              onClick={(e) => handleOpenExternalUrl(e, 'https://www.youtube.com/@CodewithKrishYT')}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex items-center gap-3.5 rounded-xl bg-slate-900/90 border border-white/12 p-3.5 hover:border-red-500/70 hover:bg-slate-800/90 transition-all duration-200 cursor-pointer shadow-md"
+            >
+              <img
+                src={youtubeImg}
+                alt="YouTube Logo"
+                onError={(e) => {
+                  const img = e.target as HTMLImageElement;
+                  img.src = 'assets/Youtube.png';
+                }}
+                className="w-11 h-11 rounded-xl object-cover border border-red-500/40 group-hover:scale-105 transition-transform shrink-0"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-xs sm:text-sm font-bold text-white group-hover:text-red-300 transition-colors">
+                  YouTube
+                </div>
+                <div className="text-[11px] text-slate-400 truncate">
+                  @CodewithKrishYT
+                </div>
+              </div>
+              <ExternalLink className="w-4 h-4 text-slate-400 group-hover:text-red-400 shrink-0" />
+            </a>
+          </div>
         </div>
       </div>
     </div>

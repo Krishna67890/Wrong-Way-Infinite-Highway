@@ -54,13 +54,13 @@ const STAT_ORDER: UpgradeStatKey[] = [
 ];
 
 const CATEGORIES: { id: 'all' | CarCategory; label: string }[] = [
-  { id: 'all', label: 'All (16)' },
+  { id: 'all', label: `All (${CARS.length})` },
+  { id: 'emergency', label: 'Emergency (6)' },
   { id: 'sports', label: 'Sports' },
   { id: 'supercar', label: 'Supercars' },
   { id: 'hypercar', label: 'Hypercars' },
   { id: 'luxury', label: 'Luxury' },
   { id: 'limousine', label: 'Limousines' },
-  { id: 'special', label: 'Special' },
 ];
 
 const DECALS: { id: DecalStyle; label: string }[] = [
@@ -159,46 +159,48 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-30 flex flex-col justify-between p-3 sm:p-5 pointer-events-none"
+      className="fixed inset-0 z-30 flex flex-col justify-between gap-2 p-2.5 sm:p-5 pointer-events-none"
       style={{
-        paddingTop: 'max(0.75rem, env(safe-area-inset-top))',
-        paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+        paddingTop: 'max(0.6rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.6rem, env(safe-area-inset-bottom))',
+        paddingLeft: 'max(0.6rem, env(safe-area-inset-left))',
+        paddingRight: 'max(0.6rem, env(safe-area-inset-right))',
       }}
     >
       {/* Top Bar */}
-      <div className="pointer-events-auto flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[#090d16]/90 border border-white/10 px-4 py-2.5">
-        <div className="flex items-center gap-3">
+      <div className="pointer-events-auto flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#090d16]/92 border border-white/10 px-3 sm:px-4 py-2 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <button
             type="button"
             onClick={onBack}
-            className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-sm font-semibold text-slate-200 hover:bg-slate-700 transition-colors cursor-pointer"
+            className="flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs sm:text-sm font-semibold text-slate-200 hover:bg-slate-700 transition-colors cursor-pointer shrink-0"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>Back</span>
+            <span className="hidden xs:inline">Back</span>
           </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-display text-lg font-bold text-white leading-tight">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-display text-sm sm:text-lg font-bold text-white leading-tight truncate">
                 {car.name}
               </span>
               <span
-                className={`rounded border px-2 py-0.5 font-display text-[10px] font-bold uppercase ${CLASS_BADGE_STYLES[car.carClass]}`}
+                className={`rounded border px-1.5 py-0.5 font-display text-[9px] sm:text-[10px] font-bold uppercase ${CLASS_BADGE_STYLES[car.carClass]}`}
               >
                 {car.carClass}
               </span>
-              <span className="text-xs text-amber-400">· {car.rarity}</span>
+              <span className="text-[11px] text-amber-400 hidden sm:inline">· {car.rarity}</span>
             </div>
-            <div className="text-xs text-slate-400">
+            <div className="text-[11px] text-slate-400 truncate hidden sm:block">
               {car.tierLabel} · Drag car to rotate 360°
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-1 rounded-lg bg-slate-900 p-1 border border-white/10">
+        <div className="flex items-center gap-1 rounded-lg bg-slate-900 p-0.5 border border-white/10">
           <button
             type="button"
             onClick={() => setTab('garage')}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+            className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] sm:text-xs font-semibold transition-colors cursor-pointer ${
               tab === 'garage'
                 ? 'bg-amber-500 text-slate-950'
                 : 'text-slate-300 hover:text-white'
@@ -210,35 +212,35 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
           <button
             type="button"
             onClick={() => setTab('upgrades')}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+            className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] sm:text-xs font-semibold transition-colors cursor-pointer ${
               tab === 'upgrades'
                 ? 'bg-cyan-400 text-slate-950'
                 : 'text-slate-300 hover:text-white'
             }`}
           >
             <Wrench className="w-3.5 h-3.5" />
-            <span>Upgrades (Lv.10)</span>
+            <span>Upgrades</span>
           </button>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 ml-auto sm:ml-0">
           <button
             type="button"
             disabled={adLoading}
             onClick={onWatchAdCoins}
-            className="flex items-center gap-1.5 rounded-lg bg-emerald-500/20 border border-emerald-400/40 px-2.5 py-1.5 font-display text-[11px] font-bold text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-60 cursor-pointer"
+            className="flex items-center gap-1 rounded-lg bg-emerald-500/20 border border-emerald-400/40 px-2 sm:px-2.5 py-1.5 font-display text-[10px] sm:text-[11px] font-bold text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-60 cursor-pointer whitespace-nowrap"
           >
             <Coins className="w-3.5 h-3.5 text-emerald-300" />
             <span>{adLoading ? 'LOADING AD...' : 'WATCH AD · +500'}</span>
           </button>
-          <div className="flex items-center gap-1.5 rounded-lg bg-slate-900 border border-white/10 px-3 py-1.5 font-mono-num text-sm font-bold text-amber-300">
-            <Coins className="w-4 h-4 text-amber-400" />
+          <div className="flex items-center gap-1 rounded-lg bg-slate-900 border border-white/10 px-2.5 py-1.5 font-mono-num text-xs sm:text-sm font-bold text-amber-300">
+            <Coins className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
             <span>{progress.coins.toLocaleString()}</span>
           </div>
           <button
             type="button"
             onClick={onDriveNow}
-            className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-4 py-2 text-xs font-display font-bold tracking-wider text-slate-950 hover:bg-amber-400 transition-colors cursor-pointer"
+            className="flex items-center gap-1 rounded-lg bg-amber-500 px-3 sm:px-4 py-1.5 sm:py-2 text-xs font-display font-bold tracking-wider text-slate-950 hover:bg-amber-400 transition-colors cursor-pointer"
           >
             <Play className="w-3.5 h-3.5 fill-current" />
             <span>DRIVE</span>
@@ -246,10 +248,10 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
         </div>
       </div>
 
-      {/* Bottom Dock */}
-      <div className="pointer-events-auto mx-auto w-full max-w-6xl rounded-xl bg-[#090d16]/94 border border-white/12 p-3 sm:p-4 max-h-[calc(100dvh-4.5rem)] overflow-y-auto custom-scroll">
+      {/* Responsive Bottom Dock — bounded height keeps 3D turntable clear on all Android devices */}
+      <div className="pointer-events-auto mx-auto w-full max-w-6xl rounded-xl bg-[#090d16]/94 border border-white/12 p-2.5 sm:p-4 max-h-[48dvh] sm:max-h-[52dvh] overflow-y-auto custom-scroll">
         {tab === 'garage' ? (
-          <div className="flex flex-col gap-2.5">
+          <div className="flex flex-col gap-2.5 sm:gap-3">
             {/* Category Filter Strip */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scroll">
               {CATEGORIES.map((cat) => (
@@ -257,7 +259,7 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
                   key={cat.id}
                   type="button"
                   onClick={() => setCategoryFilter(cat.id)}
-                  className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
+                  className={`shrink-0 rounded-md px-2.5 sm:px-3 py-1 text-[11px] sm:text-xs font-semibold transition-colors cursor-pointer ${
                     categoryFilter === cat.id
                       ? 'bg-amber-500 text-slate-950'
                       : 'bg-slate-900 text-slate-300 hover:text-white border border-white/10'
@@ -268,8 +270,8 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
               ))}
             </div>
 
-            {/* Car Selector Grid (Shows all cars clearly in a scrollable grid) */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 max-h-[38vh] overflow-y-auto custom-scroll p-1 pr-2">
+            {/* Car Selector Strip */}
+            <div className="flex gap-2 overflow-x-auto pb-1 custom-scroll">
               {filteredCars.map((item) => {
                 const unlocked = progress.unlockedCars.includes(item.id);
                 const equipped = progress.equippedCar === item.id;
@@ -282,31 +284,26 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
                       setConfirmBuyId(null);
                       onSelectPreviewCar(item.id);
                     }}
-                    className={`rounded-lg border p-2.5 text-left transition-colors cursor-pointer flex flex-col justify-between ${
+                    className={`shrink-0 rounded-lg border px-2.5 sm:px-3 py-2 text-left transition-colors cursor-pointer min-w-[138px] sm:min-w-[152px] ${
                       selected
-                        ? 'bg-slate-800 border-amber-400 text-white shadow-md'
-                        : 'bg-slate-900/85 border-white/10 text-slate-300 hover:border-white/25'
+                        ? 'bg-slate-800 border-amber-400 text-white'
+                        : 'bg-slate-900/80 border-white/10 text-slate-300 hover:border-white/25'
                     }`}
                   >
-                    <div>
-                      <div className="flex items-center justify-between gap-1.5 mb-1">
-                        <span className="font-display text-xs sm:text-sm font-bold truncate">
-                          {item.name}
-                        </span>
-                        {!unlocked && <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
-                        {equipped && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
-                      </div>
-                      <div className="text-[10px] text-slate-400 truncate mb-1.5">
-                        {item.tierLabel}
-                      </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-display text-xs sm:text-sm font-bold truncate">
+                        {item.name}
+                      </span>
+                      {!unlocked && <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
+                      {equipped && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
                     </div>
-                    <div className="flex items-center justify-between gap-1.5 text-[10px] sm:text-[11px] font-mono-num pt-1 border-t border-white/10">
+                    <div className="mt-1 flex items-center justify-between gap-1.5 text-[10px] sm:text-[11px] font-mono-num text-slate-400">
                       <span
                         className={`rounded border px-1.5 py-0.5 font-display text-[9px] font-bold uppercase ${CLASS_BADGE_STYLES[item.carClass]}`}
                       >
                         {item.carClass}
                       </span>
-                      <span className={unlocked ? 'text-emerald-300 font-semibold' : 'text-amber-300 font-bold'}>
+                      <span>
                         {unlocked
                           ? equipped
                             ? 'Equipped'
@@ -320,13 +317,15 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
             </div>
 
             {/* Unique Car Ability Strip */}
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-900/85 border border-white/10 px-3 py-1.5">
-              <div className="flex items-center gap-2 min-w-0">
-                <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                <span className="font-display text-xs font-bold text-white">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-900/85 border border-white/10 px-3 py-1.5 sm:py-2">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400 shrink-0" />
+                <span className="font-display text-xs font-bold text-white shrink-0">
                   {car.ability.name}
                 </span>
-                <span className="text-[11px] text-slate-300 truncate">{car.ability.description}</span>
+                <span className="text-[11px] sm:text-xs text-slate-300 truncate">
+                  {car.ability.description}
+                </span>
               </div>
               <span className="font-mono-num text-[10px] font-bold text-amber-300 shrink-0">
                 {car.ability.badge}
@@ -334,8 +333,8 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
             </div>
 
             {/* Specs + Paint + Decals + Action Row */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-center pt-2 border-t border-white/10">
-              <div className="lg:col-span-7 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-x-3 gap-y-1.5">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 sm:gap-4 items-center pt-2 border-t border-white/10">
+              <div className="lg:col-span-7 grid grid-cols-2 sm:grid-cols-4 gap-x-3 sm:gap-x-4 gap-y-2">
                 {statRows.map((s) => (
                   <div key={s.key}>
                     <div className="flex items-center justify-between text-[10px] sm:text-[11px] text-slate-300">
@@ -344,7 +343,7 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
                         {s.valueLabel}
                       </span>
                     </div>
-                    <div className="mt-0.5 h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
+                    <div className="mt-1 h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
                       <div
                         className="h-full bg-amber-400 transition-all duration-200"
                         style={{ width: `${s.pct}%` }}
@@ -355,9 +354,9 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
               </div>
 
               <div className="lg:col-span-5 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-4">
+                <div className="flex flex-wrap items-center gap-3 sm:gap-4">
                   <div>
-                    <div className="text-[11px] text-slate-400 mb-1">Paint</div>
+                    <div className="text-[10px] sm:text-[11px] text-slate-400 mb-1">Paint</div>
                     <div className="flex items-center gap-1.5">
                       {car.paletteOptions.map((hex) => (
                         <button
@@ -377,14 +376,14 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
                   </div>
 
                   <div>
-                    <div className="text-[11px] text-slate-400 mb-1">Decal</div>
+                    <div className="text-[10px] sm:text-[11px] text-slate-400 mb-1">Decal</div>
                     <div className="flex items-center gap-1">
                       {DECALS.map((d) => (
                         <button
                           key={d.id}
                           type="button"
                           onClick={() => onChangeDecal(car.id, d.id)}
-                          className={`rounded px-2 py-1 text-[11px] font-semibold cursor-pointer ${
+                          className={`rounded px-2 py-1 text-[10px] sm:text-[11px] font-semibold cursor-pointer ${
                             activeDecal === d.id
                               ? 'bg-cyan-400 text-slate-950'
                               : 'bg-slate-800 text-slate-300 hover:text-white'
@@ -407,7 +406,7 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
                             onUnlockCar(car.id);
                             setConfirmBuyId(null);
                           }}
-                          className="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-display font-bold text-slate-950 hover:bg-emerald-400 cursor-pointer"
+                          className="rounded-lg bg-emerald-500 px-3.5 py-2 text-xs font-display font-bold text-slate-950 hover:bg-emerald-400 cursor-pointer"
                         >
                           CONFIRM ({car.price.toLocaleString()})
                         </button>
@@ -424,7 +423,7 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
                         type="button"
                         disabled={!canAffordCar}
                         onClick={() => setConfirmBuyId(car.id)}
-                        className={`rounded-lg px-5 py-2.5 text-xs font-display font-bold tracking-wider transition-colors ${
+                        className={`rounded-lg px-4 py-2 text-xs font-display font-bold tracking-wider transition-colors ${
                           canAffordCar
                             ? 'bg-amber-500 text-slate-950 hover:bg-amber-400 cursor-pointer'
                             : 'bg-slate-800 text-slate-500 border border-white/10 cursor-not-allowed'
@@ -436,14 +435,14 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
                       </button>
                     )
                   ) : isEquipped ? (
-                    <div className="rounded-lg bg-emerald-500/20 border border-emerald-400/40 px-5 py-2.5 text-xs font-display font-bold tracking-wider text-emerald-300">
+                    <div className="rounded-lg bg-emerald-500/20 border border-emerald-400/40 px-4 py-2 text-xs font-display font-bold tracking-wider text-emerald-300">
                       EQUIPPED
                     </div>
                   ) : (
                     <button
                       type="button"
                       onClick={() => onEquipCar(car.id)}
-                      className="rounded-lg bg-cyan-400 px-5 py-2.5 text-xs font-display font-bold tracking-wider text-slate-950 hover:bg-cyan-300 transition-colors cursor-pointer"
+                      className="rounded-lg bg-cyan-400 px-4 py-2 text-xs font-display font-bold tracking-wider text-slate-950 hover:bg-cyan-300 transition-colors cursor-pointer"
                     >
                       EQUIP CAR
                     </button>

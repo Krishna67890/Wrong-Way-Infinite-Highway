@@ -5,21 +5,19 @@ plugins {
 android {
     namespace "com.krishna.highwayhavocwrongway"
     compileSdk 37
-    buildToolsVersion "36.0.0"
 
     defaultConfig {
         applicationId "com.krishna.highwayhavocwrongway"
         minSdk 25
         targetSdk 37
-        versionCode 1
-        versionName "1.0.0"
+        versionCode 3
+        versionName "1.2"
         multiDexEnabled true
     }
 
     buildTypes {
         debug {
             minifyEnabled false
-            applicationIdSuffix ".debug"
         }
         release {
             minifyEnabled true

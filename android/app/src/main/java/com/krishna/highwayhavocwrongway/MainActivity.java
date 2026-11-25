@@ -1,40 +1,47 @@
 package com.krishna.highwayhavocwrongway;
 
 import android.annotation.SuppressLint;
+import android.app.Dialog;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
+import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.CountDownTimer;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Gravity;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.WindowInsets;
-import android.view.WindowInsetsController;
+import android.view.Window;
 import android.view.WindowManager;
-import android.webkit.ConsoleMessage;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
-import android.webkit.WebViewClient;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.HashMap;
-import java.util.Map;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.webkit.WebViewAssetLoader;
+import androidx.webkit.WebViewClientCompat;
+
 import com.google.android.gms.ads.AdError;
 import com.google.android.gms.ads.AdListener;
 import com.google.android.gms.ads.AdRequest;
@@ -43,485 +50,678 @@ import com.google.android.gms.ads.AdView;
 import com.google.android.gms.ads.FullScreenContentCallback;
 import com.google.android.gms.ads.LoadAdError;
 import com.google.android.gms.ads.MobileAds;
+import com.google.android.gms.ads.RequestConfiguration;
+import com.google.android.gms.ads.appopen.AppOpenAd;
 import com.google.android.gms.ads.interstitial.InterstitialAd;
 import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback;
 import com.google.android.gms.ads.rewarded.RewardedAd;
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback;
 import com.google.android.gms.ads.rewardedinterstitial.RewardedInterstitialAd;
 import com.google.android.gms.ads.rewardedinterstitial.RewardedInterstitialAdLoadCallback;
+
 import org.json.JSONObject;
+
+import java.util.Collections;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "HighwayHavocAds";
+    // AdMob App ID (also declared in AndroidManifest.xml): ca-app-pub-1889923922299467~6416515245
     private static final String ADMOB_AD_UNIT_ID = "ca-app-pub-1889923922299467/9972616872";
+    private static final String ADMOB_BANNER_UNIT_ID = "ca-app-pub-1889923922299467/1825467880";
+    private static final String APP_HOST = "appassets.androidplatform.net";
+    private static final String ENTRY_URL = "https://" + APP_HOST + "/index.html";
+    private static final String PREFS_ADS = "HighwayHavocAdPrefs";
+    private static final String KEY_CACHED_FORMAT = "cached_ad_format_v3";
 
-    private enum DetectedFormat {
-        UNKNOWN,
-        REWARDED,
-        REWARDED_INTERSTITIAL,
-        INTERSTITIAL,
-        BANNER
-    }
-
-    private FrameLayout rootLayout;
     private WebView webView;
-    private FrameLayout bannerOverlayContainer;
-    private AdView bannerAdView;
+    private WebViewAssetLoader assetLoader;
+    private LinearLayout rootContainer;
+    private FrameLayout anchoredBannerSlot;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private SharedPreferences adPrefs;
 
     private RewardedAd rewardedAd;
     private RewardedInterstitialAd rewardedInterstitialAd;
     private InterstitialAd interstitialAd;
+    private AppOpenAd appOpenAd;
+    private AdView mrecFallbackAdView;
+    private AdView dockedBannerAdView;
 
-    private DetectedFormat detectedFormat = DetectedFormat.UNKNOWN;
-    private boolean sdkInitialized = false;
+    private boolean adsInitialized = false;
     private boolean isLoadingAd = false;
     private boolean isShowingAd = false;
-    private boolean isActivityPaused = false;
-    private String lastLoadError = "";
+    private boolean rewardEarnedInSession = false;
+    private boolean gameplayActive = false;
+    private boolean mrecFallbackLoaded = false;
+    private boolean dockedBannerLoaded = false;
+    private String lastAdError = "";
+    private String detectedFormat = "INITIALIZING";
+    private String cachedFormat = "";
+    private String pendingShowPurpose = null;
+    private Dialog loadingWaitDialog = null;
+    private Dialog sponsoredAdDialog = null;
+    private CountDownTimer sponsoredAdTimer = null;
 
-    private String queuedShowPurpose = null;
-    private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private final Runnable queuedTimeoutRunnable = this::onQueuedShowTimedOut;
+    private final Runnable bannerRetryRunnable = this::mountDockedAdaptiveBanner;
+    private final Runnable watchAdRetryRunnable = this::preloadWatchAds;
+    private final Runnable pendingWaitTimeoutRunnable = this::onPendingAdWaitTimeout;
 
-    private String pendingJsPurpose = null;
-    private boolean pendingJsGranted = false;
-    private String pendingJsMessage = null;
-
-    @SuppressLint("SetJavaScriptEnabled")
+    @SuppressLint({"SetJavaScriptEnabled", "SourceLockedOrientationActivity"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
-        rootLayout = new FrameLayout(this);
-        rootLayout.setBackgroundColor(0xFF080A0F);
+        adPrefs = getSharedPreferences(PREFS_ADS, MODE_PRIVATE);
+        cachedFormat = adPrefs.getString(KEY_CACHED_FORMAT, "");
+
+        // Allow responsive portrait + landscape across all Android phones, foldables, and tablets
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_USER);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        enableFullscreenImmersive();
+
+        rootContainer = new LinearLayout(this);
+        rootContainer.setOrientation(LinearLayout.VERTICAL);
+        rootContainer.setBackgroundColor(Color.parseColor("#080A0F"));
+        rootContainer.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+        ));
 
         webView = new WebView(this);
-        webView.setBackgroundColor(0xFF080A0F);
+        LinearLayout.LayoutParams webParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1.0f
+        );
+        webView.setLayoutParams(webParams);
+        webView.setBackgroundColor(Color.parseColor("#080A0F"));
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-        rootLayout.addView(
-                webView,
-                new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                )
+
+        anchoredBannerSlot = new FrameLayout(this);
+        LinearLayout.LayoutParams bannerSlotParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
         );
+        anchoredBannerSlot.setLayoutParams(bannerSlotParams);
+        anchoredBannerSlot.setBackgroundColor(Color.parseColor("#080A0F"));
+        anchoredBannerSlot.setVisibility(View.GONE);
 
-        bannerOverlayContainer = new FrameLayout(this);
-        bannerOverlayContainer.setVisibility(View.GONE);
-        bannerOverlayContainer.setBackgroundColor(0xCC05070D);
-        rootLayout.addView(
-                bannerOverlayContainer,
-                new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                )
-        );
-
-        setContentView(rootLayout);
-
-        webView.setFocusable(true);
-        webView.setFocusableInTouchMode(true);
-        webView.requestFocus();
-        webView.setOnTouchListener((v, event) -> {
-            if (!v.hasFocus()) {
-                v.requestFocus();
-            }
-            return false;
-        });
+        rootContainer.addView(webView);
+        rootContainer.addView(anchoredBannerSlot);
+        setContentView(rootContainer);
 
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
+        settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
         settings.setSupportZoom(false);
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
-        settings.setMediaPlaybackRequiresUserGesture(false);
-        settings.setAllowFileAccess(true);
-        settings.setAllowContentAccess(true);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        }
+        settings.setTextZoom(100);
+        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            WebView.setWebContentsDebuggingEnabled(true);
-        }
-
-        final WebViewAssetLoader assetLoader = new WebViewAssetLoader.Builder()
-                .setDomain("appassets.androidplatform.net")
+        // Serve / -> assets/public/ so root-relative /assets/... imports resolve cleanly
+        WebViewAssetLoader.AssetsPathHandler publicHandler =
+                new WebViewAssetLoader.AssetsPathHandler(this);
+        assetLoader = new WebViewAssetLoader.Builder()
+                .setDomain(APP_HOST)
                 .addPathHandler("/", path -> {
-                    try {
-                        String cleanPath = path;
-                        while (cleanPath.startsWith("/")) {
-                            cleanPath = cleanPath.substring(1);
-                        }
-                        if (cleanPath.isEmpty()) {
-                            cleanPath = "index.html";
-                        }
-                        String assetPath = cleanPath.startsWith("public/") ? cleanPath : "public/" + cleanPath;
-                        InputStream is = getAssets().open(assetPath);
-                        String mimeType = getMimeType(assetPath);
-                        Map<String, String> responseHeaders = new HashMap<>();
-                        responseHeaders.put("Access-Control-Allow-Origin", "*");
-                        responseHeaders.put("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-                        responseHeaders.put("Access-Control-Allow-Headers", "*");
-                        return new WebResourceResponse(mimeType, "UTF-8", 200, "OK", responseHeaders, is);
-                    } catch (IOException e) {
-                        Log.w(TAG, "Asset not found for path '" + path + "': " + e.getMessage());
-                        return null;
+                    String normalized = (path == null || path.isEmpty() || "/".equals(path))
+                            ? "index.html"
+                            : (path.startsWith("/") ? path.substring(1) : path);
+                    if (normalized.endsWith("/")) {
+                        normalized = normalized + "index.html";
                     }
+                    WebResourceResponse response = publicHandler.handle("public/" + normalized);
+                    if (response == null && !normalized.contains(".")) {
+                        response = publicHandler.handle("public/index.html");
+                    }
+                    return response;
                 })
                 .build();
 
-        webView.setWebViewClient(new WebViewClient() {
+        webView.setWebViewClient(new WebViewClientCompat() {
             @Override
+            public boolean shouldOverrideUrlLoading(@NonNull WebView view, @NonNull WebResourceRequest request) {
+                String url = request.getUrl().toString();
+                if (url.startsWith("http://") || url.startsWith("https://")) {
+                    if (!url.contains("appassets.androidplatform.net")) {
+                        try {
+                            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                            startActivity(intent);
+                            return true;
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error opening external link: " + e.getMessage());
+                        }
+                    }
+                }
+                return super.shouldOverrideUrlLoading(view, request);
+            }
+
+            @Override
+            @Nullable
             public WebResourceResponse shouldInterceptRequest(
                     WebView view,
                     WebResourceRequest request
             ) {
-                Uri url = request.getUrl();
-                if ("appassets.androidplatform.net".equals(url.getHost())) {
-                    return assetLoader.shouldInterceptRequest(url);
-                }
-                return super.shouldInterceptRequest(view, request);
+                return assetLoader.shouldInterceptRequest(request.getUrl());
             }
 
             @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    if (request.isForMainFrame()) {
-                        Uri url = request.getUrl();
-                        if (url != null && !"appassets.androidplatform.net".equals(url.getHost())) {
-                            try {
-                                startActivity(new Intent(Intent.ACTION_VIEW, url));
-                            } catch (Exception ignored) {
-                            }
-                            return true;
-                        }
-                    }
-                } else {
-                    Uri url = request.getUrl();
-                    if (url != null && !"appassets.androidplatform.net".equals(url.getHost())) {
-                        try {
-                            startActivity(new Intent(Intent.ACTION_VIEW, url));
-                        } catch (Exception ignored) {
-                        }
-                        return true;
-                    }
-                }
-                return false;
+            @SuppressWarnings("deprecation")
+            @Nullable
+            public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
+                return assetLoader.shouldInterceptRequest(Uri.parse(url));
             }
         });
 
-        webView.setWebChromeClient(new WebChromeClient() {
-            @Override
-            public boolean onConsoleMessage(ConsoleMessage consoleMessage) {
-                Log.d("WebConsole", consoleMessage.message() + " -- From line "
-                        + consoleMessage.lineNumber() + " of "
-                        + consoleMessage.sourceId());
-                return true;
-            }
-        });
-
+        webView.setWebChromeClient(new WebChromeClient());
         webView.addJavascriptInterface(new AndroidAdsBridge(), "AndroidAdsBridge");
-        webView.loadUrl("https://appassets.androidplatform.net/index.html");
-        enableImmersiveMode();
 
-        MobileAds.initialize(this, initializationStatus -> runOnUiThread(() -> {
-            sdkInitialized = true;
-            loadAdIfNeeded();
-        }));
+        RequestConfiguration requestConfig = new RequestConfiguration.Builder()
+                .setTestDeviceIds(Collections.emptyList())
+                .build();
+        MobileAds.setRequestConfiguration(requestConfig);
+
+        MobileAds.initialize(this, initializationStatus -> {
+            Log.d(TAG, "AdMob initialized: " + initializationStatus.getAdapterStatusMap());
+            adsInitialized = true;
+            mountDockedAdaptiveBanner();
+            preloadWatchAds();
+        });
+
+        webView.loadUrl(ENTRY_URL);
     }
 
-    private boolean hasLoadedFullScreenAd() {
-        return rewardedAd != null || rewardedInterstitialAd != null || interstitialAd != null;
+    @Override
+    public void onConfigurationChanged(@NonNull Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        enableFullscreenImmersive();
+        mainHandler.postDelayed(() -> {
+            if (adsInitialized) {
+                mountDockedAdaptiveBanner();
+            }
+        }, 180);
     }
 
-    private boolean hasReadyAd() {
-        return hasLoadedFullScreenAd() || (detectedFormat == DetectedFormat.BANNER && bannerAdView != null);
+    private void enableFullscreenImmersive() {
+        Window window = getWindow();
+        WindowCompat.setDecorFitsSystemWindows(window, false);
+        WindowInsetsControllerCompat controller =
+                WindowCompat.getInsetsController(window, window.getDecorView());
+        if (controller != null) {
+            controller.hide(WindowInsetsCompat.Type.systemBars());
+            controller.setSystemBarsBehavior(
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            );
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            WindowManager.LayoutParams lp = window.getAttributes();
+            lp.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            window.setAttributes(lp);
+        }
     }
 
-    private void loadAdIfNeeded() {
-        if (!sdkInitialized || isLoadingAd || hasLoadedFullScreenAd() || isFinishing() || isDestroyed()) {
+    private boolean hasFullscreenAdLoaded() {
+        return rewardedAd != null
+                || rewardedInterstitialAd != null
+                || interstitialAd != null
+                || appOpenAd != null;
+    }
+
+    private boolean hasLoadedAd() {
+        return hasFullscreenAdLoaded()
+                || (mrecFallbackAdView != null && mrecFallbackLoaded);
+    }
+
+    private void saveDetectedFormat(String format) {
+        detectedFormat = format;
+        cachedFormat = format;
+        if (adPrefs != null) {
+            adPrefs.edit().putString(KEY_CACHED_FORMAT, format).apply();
+        }
+    }
+
+    private void scheduleWatchAdRetry() {
+        mainHandler.removeCallbacks(watchAdRetryRunnable);
+        mainHandler.postDelayed(watchAdRetryRunnable, 15000);
+    }
+
+    /**
+     * Loads fullscreen Watch Ad inventory from ADMOB_AD_UNIT_ID.
+     */
+    private void preloadWatchAds() {
+        mainHandler.removeCallbacks(watchAdRetryRunnable);
+        if (!adsInitialized || isLoadingAd || hasFullscreenAdLoaded()) return;
+        isLoadingAd = true;
+        lastAdError = "";
+
+        if ("REWARDED".equals(cachedFormat)) {
+            loadSingleRewarded(true);
             return;
         }
-        isLoadingAd = true;
-        AdRequest adRequest = new AdRequest.Builder().build();
-
-        if (detectedFormat == DetectedFormat.INTERSTITIAL) {
-            loadInterstitial(adRequest, false);
-        } else if (detectedFormat == DetectedFormat.REWARDED_INTERSTITIAL) {
-            loadRewardedInterstitial(adRequest, false);
-        } else if (detectedFormat == DetectedFormat.BANNER) {
-            loadBannerFallback(adRequest);
-        } else {
-            loadRewarded(adRequest);
+        if ("REWARDED_INTERSTITIAL".equals(cachedFormat)) {
+            loadSingleRewardedInterstitial(true);
+            return;
         }
-    }
-
-    private void loadRewarded(AdRequest adRequest) {
-        RewardedAd.load(
-                this,
-                ADMOB_AD_UNIT_ID,
-                adRequest,
-                new RewardedAdLoadCallback() {
-                    @Override
-                    public void onAdLoaded(@NonNull RewardedAd ad) {
-                        rewardedAd = ad;
-                        detectedFormat = DetectedFormat.REWARDED;
-                        isLoadingAd = false;
-                        lastLoadError = "";
-                        flushQueuedAdIfReady();
-                    }
-
-                    @Override
-                    public void onAdFailedToLoad(@NonNull LoadAdError loadAdError) {
-                        rewardedAd = null;
-                        lastLoadError = loadAdError.getMessage();
-                        Log.w(TAG, "RewardedAd failed (" + loadAdError.getCode() + "): " + lastLoadError);
-                        loadRewardedInterstitial(adRequest, true);
-                    }
-                }
-        );
-    }
-
-    private void loadRewardedInterstitial(AdRequest adRequest, boolean allowFallback) {
-        RewardedInterstitialAd.load(
-                this,
-                ADMOB_AD_UNIT_ID,
-                adRequest,
-                new RewardedInterstitialAdLoadCallback() {
-                    @Override
-                    public void onAdLoaded(@NonNull RewardedInterstitialAd ad) {
-                        rewardedInterstitialAd = ad;
-                        detectedFormat = DetectedFormat.REWARDED_INTERSTITIAL;
-                        isLoadingAd = false;
-                        lastLoadError = "";
-                        flushQueuedAdIfReady();
-                    }
-
-                    @Override
-                    public void onAdFailedToLoad(@NonNull LoadAdError loadAdError) {
-                        rewardedInterstitialAd = null;
-                        lastLoadError = loadAdError.getMessage();
-                        Log.w(TAG, "RewardedInterstitialAd failed (" + loadAdError.getCode() + "): " + lastLoadError);
-                        if (allowFallback) {
-                            loadInterstitial(adRequest, true);
-                        } else {
-                            finishLoadFailure();
-                        }
-                    }
-                }
-        );
-    }
-
-    private void loadInterstitial(AdRequest adRequest, boolean allowFallback) {
-        InterstitialAd.load(
-                this,
-                ADMOB_AD_UNIT_ID,
-                adRequest,
-                new InterstitialAdLoadCallback() {
-                    @Override
-                    public void onAdLoaded(@NonNull InterstitialAd ad) {
-                        interstitialAd = ad;
-                        detectedFormat = DetectedFormat.INTERSTITIAL;
-                        isLoadingAd = false;
-                        lastLoadError = "";
-                        flushQueuedAdIfReady();
-                    }
-
-                    @Override
-                    public void onAdFailedToLoad(@NonNull LoadAdError loadAdError) {
-                        interstitialAd = null;
-                        lastLoadError = loadAdError.getMessage();
-                        Log.w(TAG, "InterstitialAd failed (" + loadAdError.getCode() + "): " + lastLoadError);
-                        if (allowFallback) {
-                            loadBannerFallback(adRequest);
-                        } else {
-                            finishLoadFailure();
-                        }
-                    }
-                }
-        );
-    }
-
-    private void loadBannerFallback(AdRequest adRequest) {
-        if (bannerAdView != null) {
-            bannerAdView.destroy();
-            bannerAdView = null;
+        if ("INTERSTITIAL".equals(cachedFormat)) {
+            loadSingleInterstitial(true);
+            return;
         }
-        bannerOverlayContainer.removeAllViews();
+        if ("APP_OPEN".equals(cachedFormat)) {
+            loadSingleAppOpen(true);
+            return;
+        }
 
-        final AdView adView = new AdView(this);
-        adView.setAdUnitId(ADMOB_AD_UNIT_ID);
-        adView.setAdSize(AdSize.MEDIUM_RECTANGLE);
-        adView.setAdListener(new AdListener() {
-            @Override
-            public void onAdLoaded() {
-                bannerAdView = adView;
-                detectedFormat = DetectedFormat.BANNER;
+        probeWatchFormatsInParallel();
+    }
+
+    private void probeWatchFormatsInParallel() {
+        final int totalProbes = 5;
+        final AtomicInteger remainingFailures = new AtomicInteger(totalProbes);
+
+        Runnable onProbeFailed = () -> {
+            if (remainingFailures.decrementAndGet() == 0 && !hasLoadedAd()) {
                 isLoadingAd = false;
-                lastLoadError = "";
-                flushQueuedAdIfReady();
+                detectedFormat = "NO_FILL";
+                cachedFormat = "";
+                scheduleWatchAdRetry();
+                if (pendingShowPurpose != null && !isShowingAd) {
+                    mainHandler.removeCallbacks(pendingWaitTimeoutRunnable);
+                    dismissLoadingWaitDialog();
+                    String purpose = pendingShowPurpose;
+                    pendingShowPurpose = null;
+                    showAdMobOverlayDialog(purpose, null);
+                }
+            }
+        };
+
+        // 1. Rewarded
+        RewardedAd.load(this, ADMOB_AD_UNIT_ID, new AdRequest.Builder().build(), new RewardedAdLoadCallback() {
+            @Override
+            public void onAdLoaded(@NonNull RewardedAd ad) {
+                rewardedAd = ad;
+                isLoadingAd = false;
+                lastAdError = "";
+                saveDetectedFormat("REWARDED");
+                deliverPendingShowIfWaiting();
             }
 
             @Override
-            public void onAdFailedToLoad(@NonNull LoadAdError loadAdError) {
-                adView.destroy();
-                bannerAdView = null;
-                lastLoadError = loadAdError.getMessage();
-                Log.w(TAG, "BannerAd failed (" + loadAdError.getCode() + "): " + lastLoadError);
-                finishLoadFailure();
+            public void onAdFailedToLoad(@NonNull LoadAdError err) {
+                Log.w(TAG, "Rewarded load failed (" + err.getCode() + "): " + err.getMessage());
+                if (lastAdError.isEmpty()) lastAdError = err.getCode() + ": " + err.getMessage();
+                onProbeFailed.run();
             }
         });
 
-        LinearLayout wrapper = new LinearLayout(this);
-        wrapper.setOrientation(LinearLayout.VERTICAL);
-        wrapper.setGravity(Gravity.CENTER);
-        wrapper.setPadding(24, 24, 24, 24);
-        wrapper.addView(adView);
+        // 2. Rewarded Interstitial
+        RewardedInterstitialAd.load(this, ADMOB_AD_UNIT_ID, new AdRequest.Builder().build(), new RewardedInterstitialAdLoadCallback() {
+            @Override
+            public void onAdLoaded(@NonNull RewardedInterstitialAd ad) {
+                rewardedInterstitialAd = ad;
+                isLoadingAd = false;
+                lastAdError = "";
+                if (!"REWARDED".equals(detectedFormat)) {
+                    saveDetectedFormat("REWARDED_INTERSTITIAL");
+                }
+                deliverPendingShowIfWaiting();
+            }
 
-        bannerOverlayContainer.addView(
-                wrapper,
-                new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        Gravity.CENTER
-                )
-        );
-        adView.loadAd(adRequest);
+            @Override
+            public void onAdFailedToLoad(@NonNull LoadAdError err) {
+                Log.w(TAG, "RewardedInt load failed (" + err.getCode() + "): " + err.getMessage());
+                if (lastAdError.isEmpty()) lastAdError = err.getCode() + ": " + err.getMessage();
+                onProbeFailed.run();
+            }
+        });
+
+        // 3. Interstitial
+        InterstitialAd.load(this, ADMOB_AD_UNIT_ID, new AdRequest.Builder().build(), new InterstitialAdLoadCallback() {
+            @Override
+            public void onAdLoaded(@NonNull InterstitialAd ad) {
+                interstitialAd = ad;
+                isLoadingAd = false;
+                lastAdError = "";
+                if (!"REWARDED".equals(detectedFormat) && !"REWARDED_INTERSTITIAL".equals(detectedFormat)) {
+                    saveDetectedFormat("INTERSTITIAL");
+                }
+                deliverPendingShowIfWaiting();
+            }
+
+            @Override
+            public void onAdFailedToLoad(@NonNull LoadAdError err) {
+                Log.w(TAG, "Interstitial load failed (" + err.getCode() + "): " + err.getMessage());
+                if (lastAdError.isEmpty()) lastAdError = err.getCode() + ": " + err.getMessage();
+                onProbeFailed.run();
+            }
+        });
+
+        // 4. App Open (4-arg API for Play Services Ads 23.3+)
+        AppOpenAd.load(this, ADMOB_AD_UNIT_ID, new AdRequest.Builder().build(), new AppOpenAd.AppOpenAdLoadCallback() {
+            @Override
+            public void onAdLoaded(@NonNull AppOpenAd ad) {
+                appOpenAd = ad;
+                isLoadingAd = false;
+                lastAdError = "";
+                if (rewardedAd == null && rewardedInterstitialAd == null && interstitialAd == null) {
+                    saveDetectedFormat("APP_OPEN");
+                }
+                deliverPendingShowIfWaiting();
+            }
+
+            @Override
+            public void onAdFailedToLoad(@NonNull LoadAdError err) {
+                Log.w(TAG, "AppOpen load failed (" + err.getCode() + "): " + err.getMessage());
+                if (lastAdError.isEmpty()) lastAdError = err.getCode() + ": " + err.getMessage();
+                onProbeFailed.run();
+            }
+        });
+
+        // 5. MREC fallback on ADMOB_AD_UNIT_ID
+        final AdView candidate = new AdView(this);
+        candidate.setAdUnitId(ADMOB_AD_UNIT_ID);
+        candidate.setAdSize(AdSize.MEDIUM_RECTANGLE);
+        candidate.setAdListener(new AdListener() {
+            @Override
+            public void onAdLoaded() {
+                if (mrecFallbackAdView != null) {
+                    mrecFallbackAdView.destroy();
+                }
+                mrecFallbackAdView = candidate;
+                mrecFallbackLoaded = true;
+                isLoadingAd = false;
+                lastAdError = "";
+                if (pendingShowPurpose != null && !isShowingAd && !hasFullscreenAdLoaded()) {
+                    mainHandler.removeCallbacks(pendingWaitTimeoutRunnable);
+                    dismissLoadingWaitDialog();
+                    String p = pendingShowPurpose;
+                    pendingShowPurpose = null;
+                    presentLoadedAd(p);
+                }
+            }
+
+            @Override
+            public void onAdFailedToLoad(@NonNull LoadAdError err) {
+                candidate.destroy();
+                Log.w(TAG, "MREC fallback failed (" + err.getCode() + "): " + err.getMessage());
+                if (lastAdError.isEmpty()) lastAdError = err.getCode() + ": " + err.getMessage();
+                onProbeFailed.run();
+            }
+        });
+        candidate.loadAd(new AdRequest.Builder().build());
     }
 
-    private void finishLoadFailure() {
-        isLoadingAd = false;
-        if (queuedShowPurpose != null) {
-            String p = queuedShowPurpose;
-            queuedShowPurpose = null;
-            mainHandler.removeCallbacks(queuedTimeoutRunnable);
-            String reason = lastLoadError.isEmpty()
-                    ? "Ad failed to load. Check internet connection."
-                    : "Ad unavailable: " + lastLoadError;
-            notifyWebAdResult(p, false, reason);
+    private void loadSingleRewarded(boolean fallbackToParallelOnFail) {
+        RewardedAd.load(this, ADMOB_AD_UNIT_ID, new AdRequest.Builder().build(), new RewardedAdLoadCallback() {
+            @Override
+            public void onAdLoaded(@NonNull RewardedAd ad) {
+                rewardedAd = ad;
+                isLoadingAd = false;
+                detectedFormat = "REWARDED";
+                lastAdError = "";
+                deliverPendingShowIfWaiting();
+            }
+
+            @Override
+            public void onAdFailedToLoad(@NonNull LoadAdError err) {
+                rewardedAd = null;
+                lastAdError = "Rewarded " + err.getCode() + ": " + err.getMessage();
+                if (fallbackToParallelOnFail) {
+                    cachedFormat = "";
+                    probeWatchFormatsInParallel();
+                } else {
+                    isLoadingAd = false;
+                    scheduleWatchAdRetry();
+                }
+            }
+        });
+    }
+
+    private void loadSingleRewardedInterstitial(boolean fallbackToParallelOnFail) {
+        RewardedInterstitialAd.load(this, ADMOB_AD_UNIT_ID, new AdRequest.Builder().build(), new RewardedInterstitialAdLoadCallback() {
+            @Override
+            public void onAdLoaded(@NonNull RewardedInterstitialAd ad) {
+                rewardedInterstitialAd = ad;
+                isLoadingAd = false;
+                detectedFormat = "REWARDED_INTERSTITIAL";
+                lastAdError = "";
+                deliverPendingShowIfWaiting();
+            }
+
+            @Override
+            public void onAdFailedToLoad(@NonNull LoadAdError err) {
+                rewardedInterstitialAd = null;
+                lastAdError = "RewardedInt " + err.getCode() + ": " + err.getMessage();
+                if (fallbackToParallelOnFail) {
+                    cachedFormat = "";
+                    probeWatchFormatsInParallel();
+                } else {
+                    isLoadingAd = false;
+                    scheduleWatchAdRetry();
+                }
+            }
+        });
+    }
+
+    private void loadSingleInterstitial(boolean fallbackToParallelOnFail) {
+        InterstitialAd.load(this, ADMOB_AD_UNIT_ID, new AdRequest.Builder().build(), new InterstitialAdLoadCallback() {
+            @Override
+            public void onAdLoaded(@NonNull InterstitialAd ad) {
+                interstitialAd = ad;
+                isLoadingAd = false;
+                detectedFormat = "INTERSTITIAL";
+                lastAdError = "";
+                deliverPendingShowIfWaiting();
+            }
+
+            @Override
+            public void onAdFailedToLoad(@NonNull LoadAdError err) {
+                interstitialAd = null;
+                lastAdError = "Interstitial " + err.getCode() + ": " + err.getMessage();
+                if (fallbackToParallelOnFail) {
+                    cachedFormat = "";
+                    probeWatchFormatsInParallel();
+                } else {
+                    isLoadingAd = false;
+                    scheduleWatchAdRetry();
+                }
+            }
+        });
+    }
+
+    private void loadSingleAppOpen(boolean fallbackToParallelOnFail) {
+        AppOpenAd.load(this, ADMOB_AD_UNIT_ID, new AdRequest.Builder().build(), new AppOpenAd.AppOpenAdLoadCallback() {
+            @Override
+            public void onAdLoaded(@NonNull AppOpenAd ad) {
+                appOpenAd = ad;
+                isLoadingAd = false;
+                detectedFormat = "APP_OPEN";
+                lastAdError = "";
+                deliverPendingShowIfWaiting();
+            }
+
+            @Override
+            public void onAdFailedToLoad(@NonNull LoadAdError err) {
+                appOpenAd = null;
+                lastAdError = "AppOpen " + err.getCode() + ": " + err.getMessage();
+                if (fallbackToParallelOnFail) {
+                    cachedFormat = "";
+                    probeWatchFormatsInParallel();
+                } else {
+                    isLoadingAd = false;
+                    scheduleWatchAdRetry();
+                }
+            }
+        });
+    }
+
+    private AdSize getAdaptiveBannerSize() {
+        DisplayMetrics outMetrics = new DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getMetrics(outMetrics);
+        float widthPixels = outMetrics.widthPixels;
+        float density = outMetrics.density <= 0 ? 1f : outMetrics.density;
+        int adWidthDp = Math.max(320, (int) (widthPixels / density));
+        return AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(this, adWidthDp);
+    }
+
+    private void mountDockedAdaptiveBanner() {
+        mainHandler.removeCallbacks(bannerRetryRunnable);
+        if (!adsInitialized) return;
+
+        if (dockedBannerAdView != null) {
+            anchoredBannerSlot.removeAllViews();
+            dockedBannerAdView.destroy();
+            dockedBannerAdView = null;
+        }
+        dockedBannerLoaded = false;
+        updateAnchoredBannerVisibility();
+
+        final AdView banner = new AdView(this);
+        banner.setAdUnitId(ADMOB_BANNER_UNIT_ID);
+        banner.setAdSize(getAdaptiveBannerSize());
+        banner.setAdListener(new AdListener() {
+            @Override
+            public void onAdLoaded() {
+                if (dockedBannerAdView != banner) return;
+                dockedBannerLoaded = true;
+                Log.d(TAG, "Docked Banner loaded successfully");
+                updateAnchoredBannerVisibility();
+            }
+
+            @Override
+            public void onAdFailedToLoad(@NonNull LoadAdError err) {
+                Log.w(TAG, "Docked Banner load failed (" + err.getCode() + "): " + err.getMessage());
+                if (dockedBannerAdView == banner) {
+                    dockedBannerLoaded = false;
+                    updateAnchoredBannerVisibility();
+                    mainHandler.postDelayed(bannerRetryRunnable, 15000);
+                }
+            }
+        });
+
+        dockedBannerAdView = banner;
+        anchoredBannerSlot.addView(banner);
+        banner.loadAd(new AdRequest.Builder().build());
+    }
+
+    private void updateAnchoredBannerVisibility() {
+        if (dockedBannerAdView == null || !dockedBannerLoaded || gameplayActive) {
+            anchoredBannerSlot.setVisibility(View.GONE);
+        } else {
+            anchoredBannerSlot.setVisibility(View.VISIBLE);
         }
     }
 
-    private void flushQueuedAdIfReady() {
-        if (queuedShowPurpose != null && hasReadyAd()) {
-            String p = queuedShowPurpose;
-            queuedShowPurpose = null;
-            mainHandler.removeCallbacks(queuedTimeoutRunnable);
+    private void deliverPendingShowIfWaiting() {
+        if (pendingShowPurpose != null && !isShowingAd && hasFullscreenAdLoaded()) {
+            mainHandler.removeCallbacks(pendingWaitTimeoutRunnable);
+            dismissLoadingWaitDialog();
+            String p = pendingShowPurpose;
+            pendingShowPurpose = null;
             presentLoadedAd(p);
         }
     }
 
-    private void onQueuedShowTimedOut() {
-        if (queuedShowPurpose != null) {
-            String p = queuedShowPurpose;
-            queuedShowPurpose = null;
-            String reason = lastLoadError.isEmpty()
-                    ? "Ad request timed out. Please check connection and retry."
-                    : "Ad unavailable: " + lastLoadError;
-            notifyWebAdResult(p, false, reason);
-        }
-    }
-
-    private void notifyWebAdResult(String purpose, boolean granted, String message) {
-        mainHandler.post(() -> {
-            isShowingAd = false;
-            if (isActivityPaused) {
-                pendingJsPurpose = purpose;
-                pendingJsGranted = granted;
-                pendingJsMessage = message;
-                return;
-            }
-            deliverJsResult(purpose, granted, message);
-        });
-    }
-
-    private void deliverJsResult(String purpose, boolean granted, String message) {
-        if (webView == null) return;
-        webView.onResume();
-        String js = "window.__onAndroidAdComplete && window.__onAndroidAdComplete("
-                + JSONObject.quote(purpose)
-                + ","
-                + (granted ? "true" : "false")
-                + ","
-                + JSONObject.quote(message)
-                + ");";
-        webView.evaluateJavascript(js, null);
-    }
-
-    private class AndroidAdsBridge {
-        @JavascriptInterface
-        public boolean isAdReady() {
-            return hasReadyAd();
-        }
-
-        @JavascriptInterface
-        public String getLastError() {
-            return lastLoadError;
-        }
-
-        @JavascriptInterface
-        public void preloadAd() {
-            runOnUiThread(MainActivity.this::loadAdIfNeeded);
-        }
-
-        @JavascriptInterface
-        public void showAd(final String purpose) {
-            runOnUiThread(() -> requestShowAd(purpose == null ? "double_coins" : purpose));
-        }
-    }
-
-    private void requestShowAd(final String purpose) {
-        if (isShowingAd) {
-            notifyWebAdResult(purpose, false, "An ad is already open.");
-            return;
-        }
-        if (hasReadyAd()) {
+    private void onPendingAdWaitTimeout() {
+        dismissLoadingWaitDialog();
+        if (pendingShowPurpose == null || isShowingAd) return;
+        String purpose = pendingShowPurpose;
+        pendingShowPurpose = null;
+        if (hasLoadedAd()) {
             presentLoadedAd(purpose);
-            return;
-        }
-        queuedShowPurpose = purpose;
-        mainHandler.removeCallbacks(queuedTimeoutRunnable);
-        mainHandler.postDelayed(queuedTimeoutRunnable, 12000);
-        if (!isLoadingAd) {
-            loadAdIfNeeded();
+        } else {
+            showAdMobOverlayDialog(purpose, null);
         }
     }
 
-    private void presentLoadedAd(final String purpose) {
+    private void showLoadingWaitDialog(String purpose) {
+        dismissLoadingWaitDialog();
+        pendingShowPurpose = purpose;
+
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCancelable(false);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.parseColor("#E6080C15")));
+        }
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER);
+        box.setPadding(56, 48, 56, 48);
+
+        ProgressBar spinner = new ProgressBar(this);
+        spinner.setIndeterminate(true);
+        box.addView(spinner);
+
+        TextView msg = new TextView(this);
+        msg.setText("Loading Ad...");
+        msg.setTextColor(Color.WHITE);
+        msg.setTextSize(15);
+        msg.setGravity(Gravity.CENTER);
+        msg.setPadding(0, 24, 0, 0);
+        box.addView(msg);
+
+        dialog.setContentView(box);
+        loadingWaitDialog = dialog;
+        dialog.show();
+
+        preloadWatchAds();
+        mainHandler.removeCallbacks(pendingWaitTimeoutRunnable);
+        mainHandler.postDelayed(pendingWaitTimeoutRunnable, 3000);
+    }
+
+    private void dismissLoadingWaitDialog() {
+        if (loadingWaitDialog != null) {
+            try {
+                if (loadingWaitDialog.isShowing()) {
+                    loadingWaitDialog.dismiss();
+                }
+            } catch (Exception ignored) {
+            }
+            loadingWaitDialog = null;
+        }
+    }
+
+    private void presentLoadedAd(String purpose) {
+        if (isShowingAd) return;
+
         if (rewardedAd != null) {
             final RewardedAd ad = rewardedAd;
             rewardedAd = null;
             isShowingAd = true;
-            final boolean[] rewardEarned = {false};
+            rewardEarnedInSession = false;
 
             ad.setFullScreenContentCallback(new FullScreenContentCallback() {
                 @Override
                 public void onAdDismissedFullScreenContent() {
-                    enableImmersiveMode();
-                    loadAdIfNeeded();
-                    notifyWebAdResult(
+                    isShowingAd = false;
+                    notifyAdComplete(
                             purpose,
-                            rewardEarned[0],
-                            rewardEarned[0] ? "Ad reward claimed!" : "Watch full ad to claim reward."
+                            rewardEarnedInSession,
+                            rewardEarnedInSession
+                                    ? "Reward earned!"
+                                    : "Watch the full ad to claim your reward."
                     );
+                    preloadWatchAds();
                 }
 
                 @Override
-                public void onAdFailedToShowFullScreenContent(@NonNull AdError adError) {
-                    enableImmersiveMode();
-                    loadAdIfNeeded();
-                    notifyWebAdResult(purpose, false, "Ad failed to display: " + adError.getMessage());
+                public void onAdFailedToShowFullScreenContent(@NonNull AdError err) {
+                    isShowingAd = false;
+                    showAdMobOverlayDialog(purpose, null);
+                    preloadWatchAds();
                 }
             });
-            ad.show(this, rewardItem -> rewardEarned[0] = true);
+
+            ad.show(this, rewardItem -> rewardEarnedInSession = true);
             return;
         }
 
@@ -529,28 +729,31 @@ public class MainActivity extends AppCompatActivity {
             final RewardedInterstitialAd ad = rewardedInterstitialAd;
             rewardedInterstitialAd = null;
             isShowingAd = true;
-            final boolean[] rewardEarned = {false};
+            rewardEarnedInSession = false;
 
             ad.setFullScreenContentCallback(new FullScreenContentCallback() {
                 @Override
                 public void onAdDismissedFullScreenContent() {
-                    enableImmersiveMode();
-                    loadAdIfNeeded();
-                    notifyWebAdResult(
+                    isShowingAd = false;
+                    notifyAdComplete(
                             purpose,
-                            rewardEarned[0],
-                            rewardEarned[0] ? "Ad reward claimed!" : "Watch full ad to claim reward."
+                            rewardEarnedInSession,
+                            rewardEarnedInSession
+                                    ? "Reward earned!"
+                                    : "Watch the full ad to claim your reward."
                     );
+                    preloadWatchAds();
                 }
 
                 @Override
-                public void onAdFailedToShowFullScreenContent(@NonNull AdError adError) {
-                    enableImmersiveMode();
-                    loadAdIfNeeded();
-                    notifyWebAdResult(purpose, false, "Ad failed to display: " + adError.getMessage());
+                public void onAdFailedToShowFullScreenContent(@NonNull AdError err) {
+                    isShowingAd = false;
+                    showAdMobOverlayDialog(purpose, null);
+                    preloadWatchAds();
                 }
             });
-            ad.show(this, rewardItem -> rewardEarned[0] = true);
+
+            ad.show(this, rewardItem -> rewardEarnedInSession = true);
             return;
         }
 
@@ -558,170 +761,367 @@ public class MainActivity extends AppCompatActivity {
             final InterstitialAd ad = interstitialAd;
             interstitialAd = null;
             isShowingAd = true;
+            rewardEarnedInSession = false;
 
             ad.setFullScreenContentCallback(new FullScreenContentCallback() {
                 @Override
-                public void onAdDismissedFullScreenContent() {
-                    enableImmersiveMode();
-                    loadAdIfNeeded();
-                    notifyWebAdResult(purpose, true, "Ad completed! Reward granted.");
+                public void onAdShowedFullScreenContent() {
+                    rewardEarnedInSession = true;
                 }
 
                 @Override
-                public void onAdFailedToShowFullScreenContent(@NonNull AdError adError) {
-                    enableImmersiveMode();
-                    loadAdIfNeeded();
-                    notifyWebAdResult(purpose, false, "Ad failed to display: " + adError.getMessage());
+                public void onAdDismissedFullScreenContent() {
+                    isShowingAd = false;
+                    notifyAdComplete(
+                            purpose,
+                            rewardEarnedInSession,
+                            rewardEarnedInSession ? "Reward earned!" : "Ad closed."
+                    );
+                    preloadWatchAds();
+                }
+
+                @Override
+                public void onAdFailedToShowFullScreenContent(@NonNull AdError err) {
+                    isShowingAd = false;
+                    showAdMobOverlayDialog(purpose, null);
+                    preloadWatchAds();
                 }
             });
+
             ad.show(this);
             return;
         }
 
-        if (detectedFormat == DetectedFormat.BANNER && bannerAdView != null) {
+        if (appOpenAd != null) {
+            final AppOpenAd ad = appOpenAd;
+            appOpenAd = null;
             isShowingAd = true;
-            presentBannerOverlay(purpose);
+            rewardEarnedInSession = false;
+
+            ad.setFullScreenContentCallback(new FullScreenContentCallback() {
+                @Override
+                public void onAdShowedFullScreenContent() {
+                    rewardEarnedInSession = true;
+                }
+
+                @Override
+                public void onAdDismissedFullScreenContent() {
+                    isShowingAd = false;
+                    notifyAdComplete(
+                            purpose,
+                            rewardEarnedInSession,
+                            rewardEarnedInSession ? "Reward earned!" : "Ad closed."
+                    );
+                    preloadWatchAds();
+                }
+
+                @Override
+                public void onAdFailedToShowFullScreenContent(@NonNull AdError err) {
+                    isShowingAd = false;
+                    showAdMobOverlayDialog(purpose, null);
+                    preloadWatchAds();
+                }
+            });
+
+            ad.show(this);
             return;
         }
 
-        loadAdIfNeeded();
-        notifyWebAdResult(purpose, false, "Ad is loading. Try again in a moment.");
+        if (mrecFallbackAdView != null && mrecFallbackLoaded) {
+            AdView readyView = mrecFallbackAdView;
+            mrecFallbackAdView = null;
+            mrecFallbackLoaded = false;
+            showAdMobOverlayDialog(purpose, readyView);
+            return;
+        }
+
+        // Wait up to 3s for real AdMob full-screen ad to load; if still unavailable, show AdMob Banner / Sponsored Promo
+        showLoadingWaitDialog(purpose);
     }
 
-    private void presentBannerOverlay(final String purpose) {
-        if (bannerOverlayContainer.getChildCount() == 0) {
-            bannerOverlayContainer.setVisibility(View.GONE);
-            isShowingAd = false;
-            notifyWebAdResult(purpose, false, "Ad container empty.");
-            return;
+    private void showAdMobOverlayDialog(String purpose, @Nullable AdView preloadedAdView) {
+        if (isShowingAd) return;
+        isShowingAd = true;
+
+        final AdView adViewToShow;
+        if (preloadedAdView != null) {
+            if (preloadedAdView.getParent() instanceof ViewGroup) {
+                ((ViewGroup) preloadedAdView.getParent()).removeView(preloadedAdView);
+            }
+            adViewToShow = preloadedAdView;
+        } else {
+            adViewToShow = new AdView(this);
+            adViewToShow.setAdUnitId(ADMOB_BANNER_UNIT_ID);
+            adViewToShow.setAdSize(AdSize.MEDIUM_RECTANGLE);
         }
 
-        View child = bannerOverlayContainer.getChildAt(0);
-        if (child instanceof LinearLayout) {
-            LinearLayout wrapper = (LinearLayout) child;
-            while (wrapper.getChildCount() > 1) {
-                wrapper.removeViewAt(1);
-            }
-            Button closeBtn = new Button(this);
-            closeBtn.setText("CLAIM REWARD & CLOSE (3s)");
-            closeBtn.setEnabled(false);
-            closeBtn.setTextColor(Color.WHITE);
-            closeBtn.setBackgroundColor(0xFF0F172A);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-            );
-            lp.topMargin = 18;
-            wrapper.addView(closeBtn, lp);
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCancelable(false);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.parseColor("#F2080C15")));
+        }
 
-            bannerOverlayContainer.setVisibility(View.VISIBLE);
-            mainHandler.postDelayed(() -> {
-                closeBtn.setEnabled(true);
-                closeBtn.setText("CLOSE AD & CLAIM REWARD");
-                closeBtn.setBackgroundColor(0xFFF59E0B);
-                closeBtn.setTextColor(0xFF090D16);
-            }, 3000);
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setGravity(Gravity.CENTER);
+        layout.setPadding(36, 36, 36, 36);
 
-            closeBtn.setOnClickListener(v -> {
-                bannerOverlayContainer.setVisibility(View.GONE);
-                if (bannerAdView != null) {
-                    bannerAdView.loadAd(new AdRequest.Builder().build());
+        TextView header = new TextView(this);
+        header.setText("SPONSORED REWARD");
+        header.setTextColor(Color.parseColor("#FBBF24"));
+        header.setTextSize(16);
+        header.setGravity(Gravity.CENTER);
+        header.setPadding(0, 0, 0, 6);
+        layout.addView(header);
+
+        TextView subHeader = new TextView(this);
+        String rewardLabel = "free_revive".equals(purpose)
+                ? "Watch to revive back onto the highway"
+                : "double_coins".equals(purpose)
+                    ? "Watch to double all coins from this run"
+                    : "Watch to unlock +500 garage coins";
+        subHeader.setText(rewardLabel);
+        subHeader.setTextColor(Color.parseColor("#CBD5E1"));
+        subHeader.setTextSize(13);
+        subHeader.setGravity(Gravity.CENTER);
+        subHeader.setPadding(0, 0, 0, 18);
+        layout.addView(subHeader);
+
+        FrameLayout adContainer = new FrameLayout(this);
+        adContainer.setBackgroundColor(Color.parseColor("#0F172A"));
+        adContainer.setPadding(8, 8, 8, 8);
+        LinearLayout.LayoutParams adContainerParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        adContainerParams.gravity = Gravity.CENTER_HORIZONTAL;
+
+        LinearLayout fallbackShowcase = new LinearLayout(this);
+        fallbackShowcase.setOrientation(LinearLayout.VERTICAL);
+        fallbackShowcase.setGravity(Gravity.CENTER);
+        fallbackShowcase.setPadding(32, 32, 32, 32);
+
+        TextView promoTitle = new TextView(this);
+        promoTitle.setText("FIRE CHIEF INTERCEPTOR & SUPERCAR FLEET");
+        promoTitle.setTextColor(Color.parseColor("#38BDF8"));
+        promoTitle.setTextSize(14);
+        promoTitle.setGravity(Gravity.CENTER);
+        fallbackShowcase.addView(promoTitle);
+
+        TextView promoBody = new TextView(this);
+        promoBody.setText("Unlock Emergency Ambulances, Police Cruisers, Fire Brigade Engines & 350+ km/h Hypercars in the Garage!");
+        promoBody.setTextColor(Color.parseColor("#E2E8F0"));
+        promoBody.setTextSize(12);
+        promoBody.setGravity(Gravity.CENTER);
+        promoBody.setPadding(0, 12, 0, 0);
+        fallbackShowcase.addView(promoBody);
+
+        adContainer.addView(fallbackShowcase);
+        adContainer.addView(adViewToShow);
+
+        if (preloadedAdView == null) {
+            adViewToShow.setAdListener(new AdListener() {
+                @Override
+                public void onAdLoaded() {
+                    fallbackShowcase.setVisibility(View.GONE);
                 }
-                enableImmersiveMode();
-                notifyWebAdResult(purpose, true, "Ad completed! Reward granted.");
+            });
+            adViewToShow.loadAd(new AdRequest.Builder().build());
+        } else {
+            fallbackShowcase.setVisibility(View.GONE);
+        }
+
+        layout.addView(adContainer, adContainerParams);
+
+        Button claimBtn = new Button(this);
+        claimBtn.setText("REWARD IN 5s...");
+        claimBtn.setEnabled(false);
+        claimBtn.setBackgroundColor(Color.parseColor("#1E293B"));
+        claimBtn.setTextColor(Color.WHITE);
+        LinearLayout.LayoutParams btnParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        btnParams.topMargin = 22;
+        layout.addView(claimBtn, btnParams);
+
+        Button cancelBtn = new Button(this);
+        cancelBtn.setText("CLOSE AD");
+        cancelBtn.setBackgroundColor(Color.TRANSPARENT);
+        cancelBtn.setTextColor(Color.parseColor("#94A3B8"));
+        LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        cancelParams.topMargin = 8;
+        layout.addView(cancelBtn, cancelParams);
+
+        dialog.setContentView(layout);
+        sponsoredAdDialog = dialog;
+        dialog.show();
+
+        final boolean[] completed = {false};
+        if (sponsoredAdTimer != null) {
+            sponsoredAdTimer.cancel();
+        }
+        sponsoredAdTimer = new CountDownTimer(5000, 1000) {
+            @Override
+            public void onTick(long millisUntilFinished) {
+                long sec = (millisUntilFinished + 999) / 1000;
+                claimBtn.setText("REWARD IN " + sec + "s");
+            }
+
+            @Override
+            public void onFinish() {
+                completed[0] = true;
+                claimBtn.setEnabled(true);
+                claimBtn.setBackgroundColor(Color.parseColor("#10B981"));
+                claimBtn.setTextColor(Color.parseColor("#020617"));
+                claimBtn.setText("CLAIM REWARD & CLOSE");
+            }
+        };
+        sponsoredAdTimer.start();
+
+        View.OnClickListener closeHandler = v -> {
+            boolean grant = (v == claimBtn) && completed[0];
+            if (sponsoredAdTimer != null) {
+                sponsoredAdTimer.cancel();
+                sponsoredAdTimer = null;
+            }
+            if (dialog.isShowing()) {
+                dialog.dismiss();
+            }
+            adViewToShow.destroy();
+            sponsoredAdDialog = null;
+            isShowingAd = false;
+            notifyAdComplete(
+                    purpose,
+                    grant,
+                    grant ? "Reward earned!" : "Ad closed before reward unlocked."
+            );
+            preloadWatchAds();
+        };
+
+        claimBtn.setOnClickListener(closeHandler);
+        cancelBtn.setOnClickListener(closeHandler);
+    }
+
+    private void notifyAdComplete(String purpose, boolean granted, String message) {
+        mainHandler.post(() -> {
+            if (webView == null) return;
+            String safePurpose = JSONObject.quote(purpose == null ? "" : purpose);
+            String safeMsg = JSONObject.quote(message == null ? "" : message);
+            String js = "window.__onAndroidAdComplete && window.__onAndroidAdComplete("
+                    + safePurpose + "," + (granted ? "true" : "false") + "," + safeMsg + ");";
+            webView.evaluateJavascript(js, null);
+        });
+    }
+
+    public class AndroidAdsBridge {
+        @JavascriptInterface
+        public boolean isAdReady() {
+            return true;
+        }
+
+        @JavascriptInterface
+        public String getLastError() {
+            return lastAdError;
+        }
+
+        @JavascriptInterface
+        public String getDetectedFormat() {
+            return detectedFormat;
+        }
+
+        @JavascriptInterface
+        public void preloadAd() {
+            mainHandler.post(() -> preloadWatchAds());
+        }
+
+        @JavascriptInterface
+        public void setGameplayActive(boolean active) {
+            mainHandler.post(() -> {
+                gameplayActive = active;
+                updateAnchoredBannerVisibility();
+            });
+        }
+
+        @JavascriptInterface
+        public void showAd(String purpose) {
+            mainHandler.post(() -> {
+                if (isShowingAd) {
+                    notifyAdComplete(purpose, false, "Another ad is currently open.");
+                    return;
+                }
+                presentLoadedAd(purpose);
             });
         }
     }
 
     @Override
-    public void onWindowFocusChanged(boolean hasFocus) {
-        super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) {
-            enableImmersiveMode();
+    protected void onResume() {
+        super.onResume();
+        if (webView != null) {
+            webView.onResume();
         }
+        if (dockedBannerAdView != null) {
+            dockedBannerAdView.resume();
+        }
+        enableFullscreenImmersive();
     }
 
     @Override
     protected void onPause() {
-        isActivityPaused = true;
-        if (webView != null && !isShowingAd) {
+        if (dockedBannerAdView != null) {
+            dockedBannerAdView.pause();
+        }
+        if (webView != null) {
             webView.onPause();
         }
         super.onPause();
     }
 
     @Override
-    protected void onResume() {
-        super.onResume();
-        isActivityPaused = false;
-        if (webView != null) {
-            webView.onResume();
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            enableFullscreenImmersive();
         }
-        enableImmersiveMode();
-        if (pendingJsPurpose != null) {
-            String p = pendingJsPurpose;
-            boolean g = pendingJsGranted;
-            String m = pendingJsMessage;
-            pendingJsPurpose = null;
-            pendingJsMessage = null;
-            deliverJsResult(p, g, m);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void onBackPressed() {
+        if (webView != null && webView.canGoBack()) {
+            webView.goBack();
+        } else {
+            super.onBackPressed();
         }
     }
 
     @Override
     protected void onDestroy() {
-        mainHandler.removeCallbacksAndMessages(null);
-        if (bannerAdView != null) {
-            bannerAdView.destroy();
+        mainHandler.removeCallbacks(bannerRetryRunnable);
+        mainHandler.removeCallbacks(watchAdRetryRunnable);
+        mainHandler.removeCallbacks(pendingWaitTimeoutRunnable);
+        dismissLoadingWaitDialog();
+        if (sponsoredAdTimer != null) {
+            sponsoredAdTimer.cancel();
+            sponsoredAdTimer = null;
+        }
+        if (sponsoredAdDialog != null && sponsoredAdDialog.isShowing()) {
+            sponsoredAdDialog.dismiss();
+        }
+        if (mrecFallbackAdView != null) {
+            mrecFallbackAdView.destroy();
+        }
+        if (dockedBannerAdView != null) {
+            dockedBannerAdView.destroy();
         }
         if (webView != null) {
             webView.destroy();
         }
         super.onDestroy();
-    }
-
-    private void enableImmersiveMode() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            WindowInsetsController controller = getWindow().getInsetsController();
-            if (controller != null) {
-                controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
-                controller.setSystemBarsBehavior(
-                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                );
-            }
-        } else {
-            getWindow().getDecorView().setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                            | View.SYSTEM_UI_FLAG_FULLSCREEN
-            );
-        }
-    }
-
-    private static String getMimeType(String path) {
-        String lower = path.toLowerCase();
-        if (lower.endsWith(".js") || lower.endsWith(".mjs")) return "text/javascript";
-        if (lower.endsWith(".css")) return "text/css";
-        if (lower.endsWith(".html") || lower.endsWith(".htm")) return "text/html";
-        if (lower.endsWith(".json")) return "application/json";
-        if (lower.endsWith(".png")) return "image/png";
-        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-        if (lower.endsWith(".gif")) return "image/gif";
-        if (lower.endsWith(".svg")) return "image/svg+xml";
-        if (lower.endsWith(".ico")) return "image/x-icon";
-        if (lower.endsWith(".woff2")) return "font/woff2";
-        if (lower.endsWith(".woff")) return "font/woff";
-        if (lower.endsWith(".ttf")) return "font/ttf";
-        if (lower.endsWith(".otf")) return "font/otf";
-        if (lower.endsWith(".mp3")) return "audio/mpeg";
-        if (lower.endsWith(".wav")) return "audio/wav";
-        if (lower.endsWith(".ogg")) return "audio/ogg";
-        if (lower.endsWith(".mp4")) return "video/mp4";
-        if (lower.endsWith(".webm")) return "video/webm";
-        if (lower.endsWith(".wasm")) return "application/wasm";
-        return "application/octet-stream";
     }
 }

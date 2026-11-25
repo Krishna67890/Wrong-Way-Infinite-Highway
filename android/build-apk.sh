@@ -14,10 +14,13 @@ cp -r dist/* android/app/src/main/assets/public/
 
 echo "[3/3] Building Android APK into android/apk/..."
 cd android
-if ! command -v gradle >/dev/null 2>&1; then
-  echo "ERROR: 'gradle' was not found. Open /android in Android Studio or install JDK 17 + Gradle 8.x + Android SDK 37."
+if [ -x "./gradlew" ]; then
+  ./gradlew assembleDebug
+elif command -v gradle >/dev/null 2>&1; then
+  gradle assembleDebug
+else
+  echo "ERROR: Neither ./gradlew nor 'gradle' is runnable here. Open /android in Android Studio or install JDK 17 + Android SDK 37."
   exit 1
 fi
 
-gradle assembleDebug
 echo "Done! APK stored at: android/apk/highway-havoc-wrong-way-debug.apk"

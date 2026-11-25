@@ -27,6 +27,17 @@ import {
 
 const STORAGE_KEY = 'highway_havoc_wrong_way_save_v2';
 
+const VALID_MODES: GameModeId[] = [
+  'endless',
+  'traffic_challenge',
+  'coin_rush',
+  'time_trial',
+  'stunt_challenge',
+  'daily_challenge',
+];
+
+const REMOVED_METRICS: MissionMetric[] = ['boss_escapes'];
+
 export function getTodayDateKey(): string {
   const d = new Date();
   const y = d.getFullYear();
@@ -57,6 +68,7 @@ export function createDefaultProgress(): PlayerProgress {
     totalDistance: 0,
     totalRuns: 0,
     totalNearMisses: 0,
+    totalStuntJumps: 0,
     totalCoinsEarned: 0,
     totalRepairsCollected: 0,
     totalNitroUses: 0,
@@ -122,9 +134,25 @@ export function loadProgress(): PlayerProgress {
     const numOr = (val: unknown, def: number): number =>
       typeof val === 'number' && Number.isFinite(val) && val >= 0 ? val : def;
 
+    const rawMode = parsed.selectedMode as string | undefined;
+    const safeMode: GameModeId =
+      rawMode && VALID_MODES.includes(rawMode as GameModeId)
+        ? (rawMode as GameModeId)
+        : 'endless';
+
+    const rawEndless =
+      Array.isArray(parsed.endlessMissions) && parsed.endlessMissions.length >= 3
+        ? parsed.endlessMissions.slice(0, 3).map((m, idx) =>
+            REMOVED_METRICS.includes(m.metric)
+              ? generateEndlessMission(m.tier || idx + 1)
+              : m,
+          )
+        : fallback.endlessMissions;
+
     const merged: PlayerProgress = {
       ...fallback,
       ...parsed,
+      selectedMode: safeMode,
       coins: numOr(parsed.coins, fallback.coins),
       carParts: numOr(parsed.carParts, fallback.carParts),
       xp: numOr(parsed.xp, fallback.xp),
@@ -136,6 +164,7 @@ export function loadProgress(): PlayerProgress {
       totalDistance: numOr(parsed.totalDistance, fallback.totalDistance),
       totalRuns: numOr(parsed.totalRuns, fallback.totalRuns),
       totalNearMisses: numOr(parsed.totalNearMisses, fallback.totalNearMisses),
+      totalStuntJumps: numOr(parsed.totalStuntJumps, fallback.totalStuntJumps),
       totalCoinsEarned: numOr(parsed.totalCoinsEarned, fallback.totalCoinsEarned),
       totalRepairsCollected: numOr(parsed.totalRepairsCollected, fallback.totalRepairsCollected),
       totalNitroUses: numOr(parsed.totalNitroUses, fallback.totalNitroUses),
@@ -168,10 +197,7 @@ export function loadProgress(): PlayerProgress {
         Array.isArray(parsed.unlockedWorlds) && parsed.unlockedWorlds.length > 0
           ? Array.from(new Set(['neon_city', 'desert_highway', ...parsed.unlockedWorlds]))
           : fallback.unlockedWorlds,
-      endlessMissions:
-        Array.isArray(parsed.endlessMissions) && parsed.endlessMissions.length >= 3
-          ? parsed.endlessMissions.slice(0, 3)
-          : fallback.endlessMissions,
+      endlessMissions: rawEndless,
       endlessMissionCounter:
         typeof parsed.endlessMissionCounter === 'number' && parsed.endlessMissionCounter >= 3
           ? parsed.endlessMissionCounter
@@ -181,10 +207,14 @@ export function loadProgress(): PlayerProgress {
         : [],
       runHistory: Array.isArray(parsed.runHistory) ? parsed.runHistory.slice(0, 12) : [],
     };
+    const hasStaleDailyMetric =
+      Array.isArray(parsed.dailyMissions) &&
+      parsed.dailyMissions.some((m) => REMOVED_METRICS.includes(m.metric));
     if (
       parsed.dailyDateKey !== today ||
       !Array.isArray(parsed.dailyMissions) ||
-      parsed.dailyMissions.length === 0
+      parsed.dailyMissions.length === 0 ||
+      hasStaleDailyMetric
     ) {
       merged.dailyDateKey = today;
       merged.dailyMissions = generateDailyMissions(today);
@@ -241,6 +271,7 @@ function advanceMissionProgress(
   let nextProg = currentProgress;
   if (metric === 'distance') nextProg += summary.distance;
   else if (metric === 'coins') nextProg += totalRunCoins;
+  else if (metric === 'stunt_jumps') nextProg += summary.stuntJumps;
   else if (metric === 'near_misses') nextProg += summary.nearMisses;
   else if (metric === 'nitro_uses') nextProg += summary.nitroUses;
   else if (metric === 'repairs') nextProg += summary.repairsCollected;
@@ -287,6 +318,7 @@ export function applyRunToProgress(prev: PlayerProgress, summary: RunSummary): P
     totalDistance: refreshed.totalDistance + summary.distance,
     totalRuns: refreshed.totalRuns + 1,
     totalNearMisses: refreshed.totalNearMisses + summary.nearMisses,
+    totalStuntJumps: refreshed.totalStuntJumps + summary.stuntJumps,
     totalCoinsEarned: refreshed.totalCoinsEarned + totalRunCoins,
     totalRepairsCollected: refreshed.totalRepairsCollected + summary.repairsCollected,
     totalNitroUses: refreshed.totalNitroUses + summary.nitroUses,
@@ -512,8 +544,12 @@ export function getAchievementProgress(progress: PlayerProgress, ach: Achievemen
       return progress.maxSpeedReached;
     case 'no_damage_distance':
       return progress.maxNoDamageDistance;
+    case 'total_stunt_jumps':
+      return progress.totalStuntJumps;
     case 'total_near_misses':
       return progress.totalNearMisses;
+    case 'total_smashes':
+      return progress.totalSmashes;
     case 'best_combo':
       return progress.bestCombo;
     case 'repairs_collected':
@@ -524,12 +560,6 @@ export function getAchievementProgress(progress: PlayerProgress, ach: Achievemen
       return progress.unlockedCars.length;
     case 'nitro_uses':
       return progress.totalNitroUses;
-    case 'crashes_survived_run':
-      return progress.maxCrashesSurvivedInRun;
-    case 'total_smashes':
-      return progress.totalSmashes;
-    case 'boss_escapes':
-      return progress.totalBossEscapes;
     case 'missions_completed':
       return progress.totalMissionsCompleted;
     case 'upgrade_levels': {
@@ -549,6 +579,10 @@ export function getAchievementProgress(progress: PlayerProgress, ach: Achievemen
     case 'has_limousine': {
       const limoIds = CARS.filter((c) => c.category === 'limousine').map((c) => c.id);
       return progress.unlockedCars.some((id) => limoIds.includes(id)) ? 1 : 0;
+    }
+    case 'has_emergency': {
+      const emIds = CARS.filter((c) => c.category === 'emergency').map((c) => c.id);
+      return progress.unlockedCars.some((id) => emIds.includes(id)) ? 1 : 0;
     }
     case 'player_level':
       return progress.level;
