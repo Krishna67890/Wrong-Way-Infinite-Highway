@@ -68,3 +68,48 @@ yarn-error.log*
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+
+# Additional environment secrets
+.env.production
+.env.development
+.env.test
+!.env.example
+
+# Signing and credentials
+*.p12
+*.pfx
+*.key
+*.mobileprovision
+secrets/
+credentials/
+
+# Archives and generated files
+*.zip
+*.tar
+*.gz
+*.bak
+*.tmp
+coverage/
+.cache/
+
+# Extra security
+.env.production
+.env.development
+.env.test
+!.env.example
+*.p12
+*.pfx
+*.key
+*.mobileprovision
+secrets/
+credentials/
+
+# Generated files and archives
+*.zip
+*.tar
+*.gz
+*.bak
+*.tmp
+coverage/
+.cache/
