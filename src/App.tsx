@@ -790,7 +790,7 @@ export default function App() {
       )}
 
       {webAdState && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/82">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
           <div className="w-full max-w-sm rounded-xl bg-[#090d16] border border-amber-400/40 p-5 text-center shadow-2xl">
             <div className="text-[11px] font-display font-bold tracking-widest uppercase text-amber-400 mb-1">
               Sponsored Reward Ad
